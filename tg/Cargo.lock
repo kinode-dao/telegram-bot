@@ -1990,6 +1990,7 @@ dependencies = [
  "multipart",
  "serde",
  "serde_json",
+ "url 2.5.0",
  "wit-bindgen",
 ]
 

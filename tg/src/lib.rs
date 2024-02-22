@@ -1,9 +1,8 @@
+use frankenstein::TelegramApi;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-use kinode_process_lib::{
-    await_message, call_init, println, Address, Message, ProcessId, Request, Response,
-};
+use kinode_process_lib::{await_message, call_init, println, Address, Message};
 
 wit_bindgen::generate!({
     path: "wit",
@@ -19,11 +18,8 @@ use api::Api;
 #[derive(Debug, Serialize, Deserialize)]
 enum TgRequest {
     Test,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-enum TgResponse {
-    Ack,
+    Initialize { token: String },
+    Hello,
 }
 
 fn handle_message(our: &Address, api: &mut Option<Api>) -> anyhow::Result<()> {
@@ -39,10 +35,28 @@ fn handle_message(our: &Address, api: &mut Option<Api>) -> anyhow::Result<()> {
             ..
         } => match serde_json::from_slice(body)? {
             TgRequest::Test => {
-                Response::new()
-                    .body(serde_json::to_vec(&TgResponse::Ack).unwrap())
-                    .send()
-                    .unwrap();
+                println!("test hello");
+            }
+            TgRequest::Initialize { token } => {
+                let new_api = Api::new(&token, our.clone());
+                *api = Some(new_api);
+            }
+            TgRequest::Hello => {
+                let updates_params = frankenstein::GetUpdatesParams {
+                    offset: None,
+                    limit: Some(1),
+                    timeout: None,
+                    allowed_updates: None,
+                };
+
+                let members_params = frankenstein::GetChatMemberCountParams {
+                    chat_id: frankenstein::ChatId::Integer(6856598744),
+                };
+                let res = api
+                    .as_mut()
+                    .unwrap()
+                    .get_chat_member_count(&members_params)?;
+                println!("got resss: {:?}", res);
             }
         },
     }

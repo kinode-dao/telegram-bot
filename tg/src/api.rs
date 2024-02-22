@@ -1,13 +1,9 @@
 use frankenstein::TelegramApi;
-use kinode_process_lib::get_blob;
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 
 use kinode_process_lib::{
-    http::{
-        send_request_await_response, HeaderMap, HttpClientAction, HttpClientError,
-        HttpClientRequest, HttpClientResponse, HttpServerError, OutgoingHttpRequest,
-    },
-    Address, LazyLoadBlob, Message, Request,
+    http::{send_request_await_response, Method},
+    println, Address,
 };
 use std::collections::HashMap;
 
@@ -47,50 +43,23 @@ impl TelegramApi for Api {
         params: Option<T1>,
     ) -> Result<T2, anyhow::Error> {
         let url = format!("{}/{method}", self.api_url);
+        let url = url::Url::from_str(&url)?;
 
-        let mut req = Request::new()
-            .target(("our", "http_client", "distro", "sys"))
-            .body(serde_json::to_vec(&HttpClientAction::Http(
-                OutgoingHttpRequest {
-                    method: "GET".to_string(),
-                    version: None,
-                    url,
-                    headers: HashMap::from_iter([(
-                        "Content-Type".into(),
-                        "application/json".into(),
-                    )]),
-                },
-            ))?);
+        // content-type application/json
+        let headers: HashMap<String, String> =
+            HashMap::from_iter([("Content-Type".into(), "application/json".into())]);
 
-        // if some params to add, add them to blob.
-        if let Some(ref params) = params {
-            req = req.blob_bytes(serde_json::to_vec(params)?);
+        let body = if let Some(ref params) = params {
+            serde_json::to_vec(params)?
+        } else {
+            Vec::new()
         };
-        let msg = req.send_and_await_response(5)??;
+        let res = send_request_await_response(Method::GET, url, Some(headers), 5, body)?;
 
-        let response_body = match msg {
-            Message::Response { body, .. } => {
-                let response = serde_json::from_slice::<HttpClientResponse>(&body)?;
+        let deserialized: T2 = serde_json::from_slice(&res.body())
+            .map_err(|e| anyhow::anyhow!("Failed to deserialize response body: {}", e))?;
 
-                if let HttpClientResponse::Http(res) = response {
-                    let blob = get_blob();
-                    if let Some(blob) = blob {
-                        blob.bytes
-                    } else {
-                        return Err(anyhow::anyhow!("no blob found for http client response!"));
-                    }
-                } else {
-                    return Err(anyhow::anyhow!("got unexpected response from http_client!"));
-                }
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "got unexpected non-response from http_client!"
-                ))
-            }
-        };
-
-        serde_json::from_slice(&response_body).map_err(Into::into)
+        Ok(deserialized)
     }
 
     fn request_with_form_data<T1: serde::ser::Serialize, T2: serde::de::DeserializeOwned>(
