@@ -11,7 +11,6 @@ use std::{path::PathBuf, str::FromStr};
 static BASE_API_URL: &str = "https://api.telegram.org/bot";
 
 #[derive(Debug, Serialize, Deserialize)]
-// #[serde_untagged]
 pub struct TgInitialize {
     pub token: String,
     pub params: Option<GetUpdatesParams>,
@@ -29,17 +28,19 @@ pub fn init_tg_bot(
     our: Address,
     token: &str,
     params: Option<GetUpdatesParams>,
-) -> anyhow::Result<(Api, ProcessId)> {
+) -> anyhow::Result<(Api, Address)> {
     let tg_bot_wasm_path = format!("{}/pkg/tg.wasm", our.package_id());
 
+    // give spawned process both our caps, and grant http_client messaging.
     let our_caps = our_capabilities();
+    let http_client = ProcessId::from_str("http_client:distro:sys").unwrap();
 
     let process_id = spawn(
         None,
         &tg_bot_wasm_path,
         OnExit::None,
         our_caps,
-        vec![],
+        vec![http_client],
         false,
     )?;
 
@@ -49,15 +50,17 @@ pub fn init_tg_bot(
         params,
     };
 
+    let worker_address = Address {
+        node: our.node.clone(),
+        process: process_id.clone(),
+    };
+
     let _ = Request::new()
-        .target(Address {
-            node: our.node.clone(),
-            process: process_id.clone(),
-        })
+        .target(worker_address.clone())
         .body(serde_json::to_vec(&init)?)
         .send();
 
-    Ok((api, process_id))
+    Ok((api, worker_address))
 }
 
 pub struct Api {
@@ -119,6 +122,7 @@ impl TelegramApi for Api {
 }
 
 impl Api {
+    #[allow(unused)]
     pub fn request_no_wait<T1: serde::ser::Serialize>(
         &self,
         method: &str,

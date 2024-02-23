@@ -79,7 +79,6 @@ fn handle_message(
                         source
                     ));
                 }
-
                 let new_api = Api::new(&token, our.clone());
 
                 let updates_params = params.unwrap_or(GetUpdatesParams {
@@ -102,8 +101,7 @@ fn handle_message(
 call_init!(init);
 
 fn init(our: Address) {
-    println!("tg: begin");
-
+    println!("tg_bot: booted");
     // boot uninitialized, wait for initialize command.
     let mut api: Option<Api> = None;
     let mut parent: Option<Address> = None;
