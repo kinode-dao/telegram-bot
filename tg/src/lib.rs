@@ -1,5 +1,4 @@
 use frankenstein::{GetUpdatesParams, MethodResponse, Update};
-use serde::{Deserialize, Serialize};
 
 use kinode_process_lib::{
     await_message, call_init, get_blob,
@@ -16,19 +15,7 @@ wit_bindgen::generate!({
 });
 
 mod tg_api;
-use tg_api::Api;
-
-#[derive(Debug, Serialize, Deserialize)]
-// #[serde_untagged]
-pub struct TgInitialize {
-    token: String,
-    params: Option<GetUpdatesParams>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct TgUpdate {
-    updates: Vec<Update>,
-}
+use tg_api::{Api, TgInitialize, TgUpdate};
 
 fn handle_message(
     our: &Address,

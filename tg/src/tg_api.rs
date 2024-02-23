@@ -1,14 +1,26 @@
 /// API for the bot and the parent process.
-use crate::TgInitialize;
-use frankenstein::{GetUpdatesParams, TelegramApi};
+use frankenstein::{GetUpdatesParams, TelegramApi, Update};
 use kinode_process_lib::{
     http::{send_request, send_request_await_response, Method},
     our_capabilities, spawn, Address, OnExit, ProcessId, Request,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{path::PathBuf, str::FromStr};
 
 static BASE_API_URL: &str = "https://api.telegram.org/bot";
+
+#[derive(Debug, Serialize, Deserialize)]
+// #[serde_untagged]
+pub struct TgInitialize {
+    pub token: String,
+    pub params: Option<GetUpdatesParams>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TgUpdate {
+    pub updates: Vec<Update>,
+}
 
 /// function to spawn and initialize a tg bot.
 /// call this from your parent process to receive updates!

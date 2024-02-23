@@ -9,10 +9,11 @@ Once you have that, you can clone this repo, run `kit b` on it to build it, (ins
 
 Then put `tg/src/tg_api.rs`somewhere in your app, and make it callable by putting `mod tg_api` in your code.
 
-You might have to add frankenstein (tg types) into your project, adding the following to your `Cargo.toml`:
+You might have to add some dependencies used by the bot to your `Cargo.toml`:
 
 ```rust
 frankenstein = { version = "0.30", default-features = false, features = ["telegram-trait"] }
+url = "2.5.0"
 ```
 
 Then, spawning a worker that forwards you updates:
