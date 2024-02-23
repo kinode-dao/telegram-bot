@@ -45,4 +45,5 @@ let member_count: u32 = api.get_chat_member_count(&params)?;
 
 Some projects using this:
 
+- [simple hello bot](https://github.com/bitful-pannul/hellobot)
 - [trader bot](www.google.com)

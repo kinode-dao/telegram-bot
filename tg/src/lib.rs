@@ -31,39 +31,44 @@ fn handle_message(
 
             if let HttpClientResponse::Http(_) = response {
                 if let Some(blob) = get_blob() {
-                    // we could also just forward directly? maybe not
-                    let response =
-                        serde_json::from_slice::<MethodResponse<Vec<Update>>>(&blob.bytes)?;
+                    if let Ok(response) =
+                        serde_json::from_slice::<MethodResponse<Vec<Update>>>(&blob.bytes)
+                    {
+                        // forward to parent
+                        if let Some(parent) = parent {
+                            let request = TgUpdate {
+                                updates: response.result.clone(),
+                            };
+                            let _ = Request::new()
+                                .target(parent.clone())
+                                .body(serde_json::to_vec(&request)?)
+                                .send();
+                        }
 
-                    // forward to parent
-                    if let Some(parent) = parent {
-                        let request = TgUpdate {
-                            updates: response.result.clone(),
-                        };
-                        let _ = Request::new()
-                            .target(parent.clone())
-                            .body(serde_json::to_vec(&request)?)
-                            .send();
+                        if let Some(api) = api {
+                            // set api.current_offset based on the response, keep same if no updates
+                            let next_offset = response
+                                .result
+                                .last()
+                                .map(|u| u.update_id + 1)
+                                .unwrap_or(api.current_offset);
+                            api.current_offset = next_offset;
+
+                            let updates_params = frankenstein::GetUpdatesParams {
+                                offset: Some(api.current_offset as i64),
+                                limit: None,
+                                timeout: Some(15),
+                                allowed_updates: None,
+                            };
+
+                            api.request_no_wait("getUpdates", Some(updates_params))?;
+                        }
                     }
-
-                    if let Some(api) = api {
-                        // set api.current_offset based on the response, keep same if no updates
-                        let next_offset = response
-                            .result
-                            .last()
-                            .map(|u| u.update_id + 1)
-                            .unwrap_or(api.current_offset);
-                        api.current_offset = next_offset;
-
-                        let updates_params = frankenstein::GetUpdatesParams {
-                            offset: Some(api.current_offset as i64),
-                            limit: None,
-                            timeout: Some(15),
-                            allowed_updates: None,
-                        };
-
-                        api.request_no_wait("getUpdates", Some(updates_params))?;
-                    }
+                } else {
+                    println!(
+                        "tg_bot, failed to serialize response: {:?}",
+                        std::str::from_utf8(&body)?
+                    );
                 }
             } else {
                 return Err(anyhow::anyhow!("unexpected Response: "));
