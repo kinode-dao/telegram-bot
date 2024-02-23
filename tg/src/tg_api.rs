@@ -18,7 +18,7 @@ pub fn init_tg_bot(
     token: &str,
     params: Option<GetUpdatesParams>,
 ) -> anyhow::Result<(Api, ProcessId)> {
-    let tg_bot_wasm_path = format!("{}/pkg/tg_bot.wasm", our.package_id());
+    let tg_bot_wasm_path = format!("{}/pkg/tg.wasm", our.package_id());
 
     let our_caps = our_capabilities();
 
