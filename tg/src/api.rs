@@ -2,8 +2,8 @@ use frankenstein::TelegramApi;
 use std::{path::PathBuf, str::FromStr};
 
 use kinode_process_lib::{
-    http::{send_request_await_response, Method},
-    println, Address,
+    http::{send_request, send_request_await_response, Method},
+    Address,
 };
 use std::collections::HashMap;
 
@@ -12,6 +12,7 @@ static BASE_API_URL: &str = "https://api.telegram.org/bot";
 pub struct Api {
     pub api_url: String,
     pub our: Address,
+    pub current_offset: i64,
 }
 
 // #[derive(Debug)] define custom errors!
@@ -30,7 +31,11 @@ impl Api {
     #[must_use]
     pub fn new(api_key: &str, our: Address) -> Self {
         let api_url = format!("{BASE_API_URL}{api_key}");
-        Self { api_url, our }
+        Self {
+            api_url,
+            our,
+            current_offset: 0,
+        }
     }
 }
 
@@ -54,7 +59,7 @@ impl TelegramApi for Api {
         } else {
             Vec::new()
         };
-        let res = send_request_await_response(Method::GET, url, Some(headers), 5, body)?;
+        let res = send_request_await_response(Method::GET, url, Some(headers), 30, body)?;
 
         let deserialized: T2 = serde_json::from_slice(&res.body())
             .map_err(|e| anyhow::anyhow!("Failed to deserialize response body: {}", e))?;
@@ -71,5 +76,28 @@ impl TelegramApi for Api {
         return Err(anyhow::anyhow!(
             "tgbot doesn't support multipart uploads (yet!)"
         ));
+    }
+}
+
+impl Api {
+    pub fn request_no_wait<T1: serde::ser::Serialize>(
+        &self,
+        method: &str,
+        params: Option<T1>,
+    ) -> Result<(), anyhow::Error> {
+        let url = format!("{}/{method}", self.api_url);
+        let url = url::Url::from_str(&url)?;
+
+        // content-type application/json
+        let headers: HashMap<String, String> =
+            HashMap::from_iter([("Content-Type".into(), "application/json".into())]);
+
+        let body = if let Some(ref params) = params {
+            serde_json::to_vec(params)?
+        } else {
+            Vec::new()
+        };
+        send_request(Method::GET, url, Some(headers), Some(30), body);
+        Ok(())
     }
 }

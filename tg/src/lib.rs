@@ -1,11 +1,10 @@
-use frankenstein::TelegramApi;
+use frankenstein::{MethodResponse, TelegramApi, Update};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-use std::thread::sleep;
-use std::time::{Duration, Instant};
-
-use kinode_process_lib::{await_message, call_init, println, timer, Address, Message};
+use kinode_process_lib::{
+    await_message, call_init, get_blob, http::HttpClientResponse, println, timer, Address, Message,
+};
 
 wit_bindgen::generate!({
     path: "wit",
@@ -19,69 +18,59 @@ mod api;
 use api::Api;
 
 #[derive(Debug, Serialize, Deserialize)]
+// #[serde_untagged]
 enum TgRequest {
-    Test,
     Initialize { token: String },
     Hello,
 }
 
+// start process -> maintain loop -> increment offset ->
+//   get_updates() -> forward -> offset increment -> get_updates() -> get_updates
+//   expires?
+//   get_chat_members() -> http_call() ->
 fn handle_message(our: &Address, api: &mut Option<Api>) -> anyhow::Result<()> {
     let message = await_message()?;
 
     match message {
-        Message::Response { .. } => {
-            return Err(anyhow::anyhow!("unexpected Response: {:?}", message));
+        Message::Response { body, context, .. } => {
+            let response = serde_json::from_slice::<HttpClientResponse>(&body)?;
+            if let HttpClientResponse::Http(response) = response {
+                println!("got respose with status: {:?}", response.status);
+                // give this back to the dawg that requested this? the parent?
+                let blob = get_blob();
+                if let Some(blob) = blob {
+                    let response =
+                        serde_json::from_slice::<MethodResponse<Vec<Update>>>(&blob.bytes)?;
+                    println!("got response !: {:?}", response);
+                }
+            } else {
+                return Err(anyhow::anyhow!("unexpected Response: "));
+            }
         }
-        Message::Request {
-            ref source,
-            ref body,
-            ..
-        } => match serde_json::from_slice(body)? {
-            TgRequest::Test => {
-                println!("test hello");
-            }
+        Message::Request { ref body, .. } => match serde_json::from_slice(body)? {
             TgRequest::Initialize { token } => {
-                let new_api = Api::new(&token, our.clone());
-                *api = Some(new_api);
-            }
-            TgRequest::Hello => {
+                let mut new_api = Api::new(&token, our.clone());
+
                 let updates_params = frankenstein::GetUpdatesParams {
-                    offset: Some(21),
-                    limit: Some(10),
+                    offset: Some(new_api.current_offset),
+                    limit: None,
                     timeout: Some(30),
                     allowed_updates: None,
                 };
 
+                new_api.request_no_wait("GET", Some(updates_params))?;
+                new_api.current_offset += 1;
+
+                *api = Some(new_api);
+            }
+            TgRequest::Hello => {
                 let members_params = frankenstein::GetChatMemberCountParams {
                     chat_id: frankenstein::ChatId::Integer(6856598744),
                 };
-                let res = api.as_mut().unwrap().get_updates(&updates_params)?;
-                println!("got resss: {:?}", res);
-
-                let reply_params = frankenstein::ReplyParameters {
-                    chat_id: Some(frankenstein::ChatId::Integer(6856598744)),
-                    message_id: res.result[0].update_id as i32,
-                    allow_sending_without_reply: Some(true),
-                    quote: None,
-                    quote_entities: None,
-                    quote_parse_mode: None,
-                    quote_position: None,
-                };
-
-                let send_params = frankenstein::SendMessageParams {
-                    chat_id: frankenstein::ChatId::Integer(6856598744),
-                    text: "yes I see you!".to_string(),
-                    disable_notification: None,
-                    entities: None,
-                    message_thread_id: None,
-                    link_preview_options: None,
-                    parse_mode: None,
-                    protect_content: None,
-                    reply_markup: None,
-                    reply_parameters: Some(reply_params),
-                };
-
-                let res = api.as_mut().unwrap().send_message(&send_params);
+                let res = api
+                    .as_mut()
+                    .unwrap()
+                    .get_chat_member_count(&members_params)?;
                 println!("got response when sending: {:?}", res);
             }
         },
