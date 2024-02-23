@@ -12,7 +12,7 @@ static BASE_API_URL: &str = "https://api.telegram.org/bot";
 pub struct Api {
     pub api_url: String,
     pub our: Address,
-    pub current_offset: i64,
+    pub current_offset: u32,
 }
 
 // #[derive(Debug)] define custom errors!
@@ -97,7 +97,7 @@ impl Api {
         } else {
             Vec::new()
         };
-        send_request(Method::GET, url, Some(headers), Some(30), body);
+        send_request(Method::GET, url, Some(headers), Some(20), body);
         Ok(())
     }
 }
