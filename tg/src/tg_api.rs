@@ -1,30 +1,57 @@
-use frankenstein::TelegramApi;
-use std::{path::PathBuf, str::FromStr};
-
+/// API for the bot and the parent process.
+use crate::TgInitialize;
+use frankenstein::{GetUpdatesParams, TelegramApi};
 use kinode_process_lib::{
     http::{send_request, send_request_await_response, Method},
-    Address,
+    our_capabilities, spawn, Address, OnExit, ProcessId, Request,
 };
 use std::collections::HashMap;
+use std::{path::PathBuf, str::FromStr};
 
 static BASE_API_URL: &str = "https://api.telegram.org/bot";
+
+/// function to spawn and initialize a tg bot.
+/// call this from your parent process to receive updates!
+#[allow(unused)]
+pub fn init_tg_bot(
+    our: Address,
+    token: &str,
+    params: Option<GetUpdatesParams>,
+) -> anyhow::Result<(Api, ProcessId)> {
+    let tg_bot_wasm_path = format!("{}/pkg/tg_bot.wasm", our.package_id());
+
+    let our_caps = our_capabilities();
+
+    let process_id = spawn(
+        None,
+        &tg_bot_wasm_path,
+        OnExit::None,
+        our_caps,
+        vec![],
+        false,
+    )?;
+
+    let api = Api::new(token, our.clone());
+    let init = TgInitialize {
+        token: token.to_string(),
+        params,
+    };
+
+    let _ = Request::new()
+        .target(Address {
+            node: our.node.clone(),
+            process: process_id.clone(),
+        })
+        .body(serde_json::to_vec(&init)?)
+        .send();
+
+    Ok((api, process_id))
+}
 
 pub struct Api {
     pub api_url: String,
     pub our: Address,
     pub current_offset: u32,
-}
-
-// #[derive(Debug)] define custom errors!
-// pub enum Error {
-//     HttpError(HttpError),
-//     ApiError(ErrorResponse),
-// }
-
-#[derive(Debug)]
-pub struct HttpError {
-    pub code: u16,
-    pub message: String,
 }
 
 impl Api {

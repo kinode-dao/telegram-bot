@@ -15,12 +15,12 @@ wit_bindgen::generate!({
     },
 });
 
-mod api;
-use api::Api;
+mod tg_api;
+use tg_api::Api;
 
 #[derive(Debug, Serialize, Deserialize)]
 // #[serde_untagged]
-struct TgInitialize {
+pub struct TgInitialize {
     token: String,
     params: Option<GetUpdatesParams>,
 }
