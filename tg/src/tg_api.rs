@@ -16,6 +16,13 @@ pub struct TgInitialize {
     pub params: Option<GetUpdatesParams>,
 }
 
+/// Enum Request received by parent process for long-polling updates.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum TgResponse {
+    Update(TgUpdate),
+    Error(String),
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TgUpdate {
     pub updates: Vec<Update>,

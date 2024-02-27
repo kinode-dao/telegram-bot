@@ -15,7 +15,7 @@ wit_bindgen::generate!({
 });
 
 mod tg_api;
-use tg_api::{Api, TgInitialize, TgUpdate};
+use tg_api::{Api, TgInitialize, TgResponse, TgUpdate};
 
 fn handle_message(
     our: &Address,
@@ -39,9 +39,11 @@ fn handle_message(
                             let request = TgUpdate {
                                 updates: response.result.clone(),
                             };
+
+                            let tg_response = TgResponse::Update(request);
                             let _ = Request::new()
                                 .target(parent.clone())
-                                .body(serde_json::to_vec(&request)?)
+                                .body(serde_json::to_vec(&tg_response)?)
                                 .send();
                         }
 
@@ -65,10 +67,17 @@ fn handle_message(
                         }
                     }
                 } else {
-                    println!(
-                        "tg_bot, failed to serialize response: {:?}",
-                        std::str::from_utf8(&body)?
-                    );
+                    if let Some(ref parent_address) = parent {
+                        let error_message = format!(
+                            "tg_bot, failed to serialize response: {:?}",
+                            std::str::from_utf8(&body).unwrap_or("[Invalid UTF-8]")
+                        );
+                        let tg_response = TgResponse::Error(error_message);
+                        let _ = Request::new()
+                            .target(parent_address.clone())
+                            .body(serde_json::to_vec(&tg_response)?)
+                            .send();
+                    }
                 }
             } else {
                 return Err(anyhow::anyhow!("unexpected Response: "));
