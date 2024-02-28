@@ -23,11 +23,16 @@ let (api, tg_worker) = tg_api::init_tg_bot(our.clone, "your_token", None)?;
 // the third argument is an optional getUpdatesParams, here you can specify if you want specific updates only!
 ```
 
-Updates will come in from tg_worker processId with the struct:
+Updates will come in from tg_worker processId with the enum:
 
 ```rust
-struct TgUpdate {
-    updates: Vec<Update>,
+pub enum TgResponse {
+    Update(TgUpdate),
+    Error(String),
+}
+
+pub struct TgUpdate {
+    pub updates: Vec<Update>,
 }
 ```
 
@@ -46,4 +51,5 @@ let member_count: u32 = api.get_chat_member_count(&params)?;
 Some projects using this:
 
 - [simple hello bot](https://github.com/bitful-pannul/hellobot)
-- [trader bot](www.google.com)
+- [token gated chat](https://github.com/bitful-pannul/kinogate?tab=readme-ov-file)
+- [trader bot](https://github.com/bitful-pannul/trader)
