@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "tg",
-    "tg_interface",
+    "telegram_interface",
 ]
 
 [profile.release]
