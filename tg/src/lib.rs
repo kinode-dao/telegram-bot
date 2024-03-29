@@ -14,8 +14,7 @@ wit_bindgen::generate!({
     },
 });
 
-mod tg_api;
-use tg_api::{Api, TgInitialize, TgResponse, TgUpdate};
+use tg_interface::{Api, TgInitialize, TgResponse, TgUpdate};
 
 fn handle_message(
     our: &Address,
