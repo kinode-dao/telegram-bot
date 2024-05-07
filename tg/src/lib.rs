@@ -6,6 +6,14 @@ use kinode_process_lib::{
     println, Address, Message, Request,
 };
 
+mod structs;
+use structs::*;
+
+mod helpers;
+use helpers::*;
+
+static BASE_API_URL: &str = "https://api.telegram.org/bot";
+
 wit_bindgen::generate!({
     path: "wit",
     world: "process",
@@ -20,10 +28,13 @@ use telegram_interface::{Api, TgInitialize, TgResponse, TgUpdate};
 
 fn handle_message(
     our: &Address,
-    api: &mut Option<Api>,
     parent: &mut Option<Address>,
+    state: &mut Option<State>,
 ) -> anyhow::Result<()> {
     let message = await_message()?;
+    let Some(state) = state else {
+        return Err(anyhow::anyhow!("state not initialized"));
+    };
 
     match message {
         Message::Response { body, .. } => {
@@ -48,24 +59,22 @@ fn handle_message(
                                 .send();
                         }
 
-                        if let Some(api) = api {
-                            // set api.current_offset based on the response, keep same if no updates
-                            let next_offset = response
-                                .result
-                                .last()
-                                .map(|u| u.update_id + 1)
-                                .unwrap_or(api.current_offset);
-                            api.current_offset = next_offset;
+                        // set current_offset based on the response, keep same if no updates
+                        let next_offset = response
+                            .result
+                            .last()
+                            .map(|u| u.update_id + 1)
+                            .unwrap_or(state.current_offset);
+                        state.current_offset = next_offset;
 
-                            let updates_params = frankenstein::GetUpdatesParams {
-                                offset: Some(api.current_offset as i64),
-                                limit: None,
-                                timeout: Some(15),
-                                allowed_updates: None,
-                            };
+                        let updates_params = frankenstein::GetUpdatesParams {
+                            offset: Some(state.current_offset as i64),
+                            limit: None,
+                            timeout: Some(15),
+                            allowed_updates: None,
+                        };
 
-                            api.request_no_wait("getUpdates", Some(updates_params))?;
-                        }
+                        request_no_wait(&state.api_url, "getUpdates", Some(updates_params))?;
                     }
                 } else {
                     if let Some(ref parent_address) = parent {
@@ -117,12 +126,12 @@ call_init!(init);
 
 fn init(our: Address) {
     println!("tg_bot: booted");
-    // boot uninitialized, wait for initialize command.
-    let mut api: Option<Api> = None;
+    let mut state = State::fetch();
+    // TODO: Zena: Make these a vec
     let mut parent: Option<Address> = None;
 
     loop {
-        match handle_message(&our, &mut api, &mut parent) {
+        match handle_message(&our, &mut parent, &mut state) {
             Ok(()) => {}
             Err(e) => {
                 println!("tg: error: {:?}", e);
