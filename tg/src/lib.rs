@@ -1,4 +1,4 @@
-use frankenstein::{GetUpdatesParams, MethodResponse, Update};
+use frankenstein::{MethodResponse, Update};
 
 use kinode_process_lib::{
     await_message, call_init, get_blob,
@@ -22,7 +22,7 @@ wit_bindgen::generate!({
     },
 });
 
-use telegram_interface::{TgInitialize, TgRequest, TgResponse, TgUpdate};
+use telegram_interface::{TgRequest, TgResponse, TgUpdate};
 
 fn handle_request(
     our: &Address,
@@ -83,64 +83,66 @@ fn handle_request(
 }
 
 fn handle_response(
-    our: &Address,
     subs: &mut Vec<Address>,
     state: &mut Option<State>,
     body: &[u8],
 ) -> anyhow::Result<()> {
-    // let HttpClientResponse::Http(response) =
-    //     serde_json::from_slice::<Result<HttpClientResponse, HttpClientError>>(&body)??
-    // else {
-    //     return Err(anyhow::anyhow!("unexpected Response: "));
-    // };
+    let HttpClientResponse::Http(_) =
+        serde_json::from_slice::<Result<HttpClientResponse, HttpClientError>>(&body)??
+    else {
+        return Err(anyhow::anyhow!("unexpected Response: "));
+    };
+    let Some(state) = state else {
+        return Err(anyhow::anyhow!("state not initialized"));
+    };
 
-    // if let Some(blob) = get_blob() {
-    //     let Ok(response) = serde_json::from_slice::<MethodResponse<Vec<Update>>>(&blob.bytes)
-    //     else {
-    //         return Err(anyhow::anyhow!("unexpected Response: "));
-    //     };
-    //     // forward to subs
-    //     for sub in subs.iter() {
-    //         let request = TgUpdate {
-    //             updates: response.result.clone(),
-    //         };
+    if let Some(blob) = get_blob() {
+        let Ok(response) = serde_json::from_slice::<MethodResponse<Vec<Update>>>(&blob.bytes)
+        else {
+            return Err(anyhow::anyhow!("unexpected Response: "));
+        };
+        // forward to subs
+        for sub in subs.iter() {
+            let request = TgUpdate {
+                updates: response.result.clone(),
+            };
 
-    //         let tg_response = TgResponse::Update(request);
-    //         let _ = Request::new()
-    //             .target(sub.clone())
-    //             .body(serde_json::to_vec(&tg_response)?)
-    //             .send();
-    //     }
+            let tg_response = TgResponse::Update(request);
+            let _ = Request::new()
+                .target(sub.clone())
+                .body(serde_json::to_vec(&tg_response)?)
+                .send();
+        }
 
-    //     // set current_offset based on the response, keep same if no updates
-    //     let next_offset = response
-    //         .result
-    //         .last()
-    //         .map(|u| u.update_id + 1)
-    //         .unwrap_or(state.current_offset);
-    //     state.current_offset = next_offset;
+        // set current_offset based on the response, keep same if no updates
+        let next_offset = response
+            .result
+            .last()
+            .map(|u| u.update_id + 1)
+            .unwrap_or(state.current_offset);
+        state.current_offset = next_offset;
 
-    //     let updates_params = frankenstein::GetUpdatesParams {
-    //         offset: Some(state.current_offset as i64),
-    //         limit: None,
-    //         timeout: Some(15),
-    //         allowed_updates: None,
-    //     };
+        let updates_params = frankenstein::GetUpdatesParams {
+            offset: Some(state.current_offset as i64),
+            limit: None,
+            timeout: Some(15),
+            allowed_updates: None,
+        };
 
-    //     request_no_wait(&state.api_url, "getUpdates", Some(updates_params))?;
-    // } else {
-    //     if let Some(ref parent_address) = subs {
-    //         let error_message = format!(
-    //             "tg_bot, failed to serialize response: {:?}",
-    //             std::str::from_utf8(&body).unwrap_or("[Invalid UTF-8]")
-    //         );
-    //         let tg_response = TgResponse::Error(error_message);
-    //         let _ = Request::new()
-    //             .target(parent_address.clone())
-    //             .body(serde_json::to_vec(&tg_response)?)
-    //             .send();
-    //     }
-    // }
+        request_no_wait(&state.api_url, "getUpdates", Some(updates_params))?;
+    } else {
+        for sub in subs.iter() {
+            let error_message = format!(
+                "tg_bot, failed to serialize response: {:?}",
+                std::str::from_utf8(&body).unwrap_or("[Invalid UTF-8]")
+            );
+            let tg_response = TgResponse::Error(error_message);
+            let _ = Request::new()
+                .target(sub.clone())
+                .body(serde_json::to_vec(&tg_response)?)
+                .send();
+        }
+    }
     Ok(())
 }
 
@@ -157,7 +159,7 @@ fn handle_message(
             let _ = handle_request(our, subs, state, body, &source);
         }
         Message::Response { ref body, .. } => {
-            let _ = handle_response(our, subs, state, body);
+            let _ = handle_response(subs, state, body);
         }
     }
     Ok(())

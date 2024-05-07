@@ -6,7 +6,7 @@ use kinode_process_lib::{get_state, set_state};
 pub struct State {
     pub tg_key: String,
     pub api_url: String,
-    pub current_offset: i64,
+    pub current_offset: u32,
 }
 
 impl State {

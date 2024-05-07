@@ -1,12 +1,6 @@
 /// API for the bot and the parent process.
-use frankenstein::{GetUpdatesParams, TelegramApi, Update};
-use kinode_process_lib::{
-    http::{send_request, send_request_await_response, Method},
-    our_capabilities, spawn, Address, OnExit, ProcessId, Request,
-};
+use frankenstein::{GetUpdatesParams, Update};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::{path::PathBuf, str::FromStr};
 
 
 #[derive(Debug, Serialize, Deserialize)]
