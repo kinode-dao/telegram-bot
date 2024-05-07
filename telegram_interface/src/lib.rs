@@ -8,7 +8,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{path::PathBuf, str::FromStr};
 
-static BASE_API_URL: &str = "https://api.telegram.org/bot";
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum TgRequest {
+    RegisterApiKey(TgInitialize),
+    Subscribe,
+    Unsubscribe,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TgInitialize {
@@ -19,6 +25,7 @@ pub struct TgInitialize {
 /// Enum Request received by parent process for long-polling updates.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum TgResponse {
+    Ok, 
     Update(TgUpdate),
     Error(String),
 }
@@ -28,86 +35,4 @@ pub struct TgUpdate {
     pub updates: Vec<Update>,
 }
 
-/// function to spawn and initialize a tg bot.
-/// call this from your parent process to receive updates!
-#[allow(unused)]
-pub fn init_tg_bot(
-    our: Address,
-    token: &str,
-    params: Option<GetUpdatesParams>,
-) -> anyhow::Result<(Api, Address)> {
-    let tg_bot_wasm_path = format!("{}/pkg/tg.wasm", our.package_id());
 
-    // give spawned process both our caps, and grant http_client messaging.
-    let our_caps = our_capabilities();
-    let http_client = ProcessId::from_str("http_client:distro:sys").unwrap();
-
-    let process_id = spawn(
-        None,
-        &tg_bot_wasm_path,
-        OnExit::None,
-        our_caps,
-        vec![http_client],
-        false,
-    )?;
-
-    let api = Api::new(token, our.clone());
-    let init = TgInitialize {
-        token: token.to_string(),
-        params,
-    };
-
-    let worker_address = Address {
-        node: our.node.clone(),
-        process: process_id.clone(),
-    };
-
-    let _ = Request::new()
-        .target(worker_address.clone())
-        .body(serde_json::to_vec(&init)?)
-        .send();
-
-    Ok((api, worker_address))
-}
-
-pub struct Api {
-    pub api_url: String,
-    pub our: Address,
-    pub current_offset: u32,
-}
-
-impl Api {
-    #[must_use]
-    pub fn new(api_key: &str, our: Address) -> Self {
-        let api_url = format!("{BASE_API_URL}{api_key}");
-        Self {
-            api_url,
-            our,
-            current_offset: 0,
-        }
-    }
-}
-
-impl Api {
-    #[allow(unused)]
-    pub fn request_no_wait<T1: serde::ser::Serialize>(
-        &self,
-        method: &str,
-        params: Option<T1>,
-    ) -> Result<(), anyhow::Error> {
-        let url = format!("{}/{method}", self.api_url);
-        let url = url::Url::from_str(&url)?;
-
-        // content-type application/json
-        let headers: HashMap<String, String> =
-            HashMap::from_iter([("Content-Type".into(), "application/json".into())]);
-
-        let body = if let Some(ref params) = params {
-            serde_json::to_vec(params)?
-        } else {
-            Vec::new()
-        };
-        send_request(Method::GET, url, Some(headers), Some(20), body);
-        Ok(())
-    }
-}

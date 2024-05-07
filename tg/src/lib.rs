@@ -22,7 +22,7 @@ wit_bindgen::generate!({
     },
 });
 
-use telegram_interface::{Api, TgInitialize, TgResponse, TgUpdate};
+use telegram_interface::{Api, TgInitialize, TgResponse, TgUpdate, TgRequest};
 
 fn handle_request(
     our: &Address,
@@ -31,30 +31,64 @@ fn handle_request(
     body: &[u8],
     source: &Address,
 ) -> anyhow::Result<()> {
-    match serde_json::from_slice(body)? {
-        TgInitialize { token, params } => {
-            if source.node != our.node {
-                return Err(anyhow::anyhow!(
-                    "got initialize request from foreign source {:?}",
-                    source
-                ));
-            }
-            let new_api = Api::new(&token, our.clone());
+    if source.node != our.node {
+        return Err(anyhow::anyhow!(
+            "got initialize request from foreign source {:?}",
+            source
+        ));
+    }
+    let Some(state) = state else {
+        return Err(anyhow::anyhow!("state not initialized"));
+    };
+    match serde_json::from_slice::<TgRequest>(body)? {
+        TgRequest::RegisterApiKey(tg_initialize) => {
+            state.tg_key = tg_initialize.token;
+            state.api_url = format!("{}{}", BASE_API_URL, tg_initialize.token);
+            state.current_offset = 0;
+            state.save();
 
-            let updates_params = params.unwrap_or(GetUpdatesParams {
-                offset: Some(new_api.current_offset as i64),
+            let updates_params = frankenstein::GetUpdatesParams {
+                offset: Some(state.current_offset as i64),
                 limit: None,
                 timeout: Some(15),
                 allowed_updates: None,
-            });
+            };
+            request_no_wait(&state.api_url, "getUpdates", Some(updates_params))?;
+        },
+        TgRequest::Subscribe => {
 
-            new_api.request_no_wait("getUpdates", Some(updates_params))?;
+        },
+        TgRequest::Unsubscribe => {
 
-            *parent = Some(source);
-            *api = Some(new_api);
-        }
+        },
     }
+
+
     Ok(())
+    // let TgInitialize {token, params} = serde_json::from_slice(body)? else {
+    //     return Err(anyhow::anyhow!("unexpected Response: "));
+    // };
+    // if source.node != our.node {
+    //     return Err(anyhow::anyhow!(
+    //         "got initialize request from foreign source {:?}",
+    //         source
+    //     ));
+    // }
+    // let new_api = Api::new(&token, our.clone());
+
+    // let updates_params = params.unwrap_or(GetUpdatesParams {
+    //     offset: Some(new_api.current_offset as i64),
+    //     limit: None,
+    //     timeout: Some(15),
+    //     allowed_updates: None,
+    // });
+
+    // new_api.request_no_wait("getUpdates", Some(updates_params))?;
+
+    // *parent = Some(source);
+    // *api = Some(new_api);
+
+    // Ok(())
 }
 
 fn handle_request(
