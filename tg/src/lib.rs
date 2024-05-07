@@ -24,7 +24,99 @@ wit_bindgen::generate!({
 
 use telegram_interface::{Api, TgInitialize, TgResponse, TgUpdate};
 
-// use telegram_interface::api::{Api, TgInitialize, TgResponse, TgUpdate};
+fn handle_request(
+    our: &Address,
+    parent: &mut Option<Address>,
+    state: &mut Option<State>,
+    body: &[u8],
+    source: &Address,
+) -> anyhow::Result<()> {
+    match serde_json::from_slice(body)? {
+        TgInitialize { token, params } => {
+            if source.node != our.node {
+                return Err(anyhow::anyhow!(
+                    "got initialize request from foreign source {:?}",
+                    source
+                ));
+            }
+            let new_api = Api::new(&token, our.clone());
+
+            let updates_params = params.unwrap_or(GetUpdatesParams {
+                offset: Some(new_api.current_offset as i64),
+                limit: None,
+                timeout: Some(15),
+                allowed_updates: None,
+            });
+
+            new_api.request_no_wait("getUpdates", Some(updates_params))?;
+
+            *parent = Some(source);
+            *api = Some(new_api);
+        }
+    }
+    Ok(())
+}
+
+fn handle_request(
+    our: &Address,
+    parent: &mut Option<Address>,
+    state: &mut Option<State>,
+    body: &[u8],
+) -> anyhow::Result<()> {
+    let response = serde_json::from_slice::<Result<HttpClientResponse, HttpClientError>>(&body)??;
+
+    let HttpClientResponse::Http(response) = response else {
+        return Err(anyhow::anyhow!("unexpected Response: "));
+    };
+    if let Some(blob) = get_blob() {
+        let Ok(response) = serde_json::from_slice::<MethodResponse<Vec<Update>>>(&blob.bytes)
+        else {
+            return Err(anyhow::anyhow!("unexpected Response: "));
+        };
+        // forward to parent
+        if let Some(parent) = parent {
+            let request = TgUpdate {
+                updates: response.result.clone(),
+            };
+
+            let tg_response = TgResponse::Update(request);
+            let _ = Request::new()
+                .target(parent.clone())
+                .body(serde_json::to_vec(&tg_response)?)
+                .send();
+        }
+
+        // set current_offset based on the response, keep same if no updates
+        let next_offset = response
+            .result
+            .last()
+            .map(|u| u.update_id + 1)
+            .unwrap_or(state.current_offset);
+        state.current_offset = next_offset;
+
+        let updates_params = frankenstein::GetUpdatesParams {
+            offset: Some(state.current_offset as i64),
+            limit: None,
+            timeout: Some(15),
+            allowed_updates: None,
+        };
+
+        request_no_wait(&state.api_url, "getUpdates", Some(updates_params))?;
+    } else {
+        if let Some(ref parent_address) = parent {
+            let error_message = format!(
+                "tg_bot, failed to serialize response: {:?}",
+                std::str::from_utf8(&body).unwrap_or("[Invalid UTF-8]")
+            );
+            let tg_response = TgResponse::Error(error_message);
+            let _ = Request::new()
+                .target(parent_address.clone())
+                .body(serde_json::to_vec(&tg_response)?)
+                .send();
+        }
+    }
+    Ok(())
+}
 
 fn handle_message(
     our: &Address,
@@ -37,87 +129,10 @@ fn handle_message(
     };
 
     match message {
-        Message::Response { body, .. } => {
-            let response =
-                serde_json::from_slice::<Result<HttpClientResponse, HttpClientError>>(&body)??;
-
-            if let HttpClientResponse::Http(_) = response {
-                if let Some(blob) = get_blob() {
-                    if let Ok(response) =
-                        serde_json::from_slice::<MethodResponse<Vec<Update>>>(&blob.bytes)
-                    {
-                        // forward to parent
-                        if let Some(parent) = parent {
-                            let request = TgUpdate {
-                                updates: response.result.clone(),
-                            };
-
-                            let tg_response = TgResponse::Update(request);
-                            let _ = Request::new()
-                                .target(parent.clone())
-                                .body(serde_json::to_vec(&tg_response)?)
-                                .send();
-                        }
-
-                        // set current_offset based on the response, keep same if no updates
-                        let next_offset = response
-                            .result
-                            .last()
-                            .map(|u| u.update_id + 1)
-                            .unwrap_or(state.current_offset);
-                        state.current_offset = next_offset;
-
-                        let updates_params = frankenstein::GetUpdatesParams {
-                            offset: Some(state.current_offset as i64),
-                            limit: None,
-                            timeout: Some(15),
-                            allowed_updates: None,
-                        };
-
-                        request_no_wait(&state.api_url, "getUpdates", Some(updates_params))?;
-                    }
-                } else {
-                    if let Some(ref parent_address) = parent {
-                        let error_message = format!(
-                            "tg_bot, failed to serialize response: {:?}",
-                            std::str::from_utf8(&body).unwrap_or("[Invalid UTF-8]")
-                        );
-                        let tg_response = TgResponse::Error(error_message);
-                        let _ = Request::new()
-                            .target(parent_address.clone())
-                            .body(serde_json::to_vec(&tg_response)?)
-                            .send();
-                    }
-                }
-            } else {
-                return Err(anyhow::anyhow!("unexpected Response: "));
-            }
-        }
         Message::Request {
             ref body, source, ..
-        } => match serde_json::from_slice(body)? {
-            TgInitialize { token, params } => {
-                if source.node != our.node {
-                    return Err(anyhow::anyhow!(
-                        "got initialize request from foreign source {:?}",
-                        source
-                    ));
-                }
-                let new_api = Api::new(&token, our.clone());
-
-                let updates_params = params.unwrap_or(GetUpdatesParams {
-                    offset: Some(new_api.current_offset as i64),
-                    limit: None,
-                    timeout: Some(15),
-                    allowed_updates: None,
-                });
-
-                new_api.request_no_wait("getUpdates", Some(updates_params))?;
-
-                *parent = Some(source);
-                *api = Some(new_api);
-            }
-        },
+        } => handle_request(our, parent, state, body, &source),
+        Message::Response { body, .. } => handle_response(our, parent, state, body),
     }
     Ok(())
 }
