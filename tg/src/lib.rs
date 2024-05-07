@@ -14,7 +14,7 @@ wit_bindgen::generate!({
     },
 });
 
-use telegram_interface::api::{Api, TgInitialize, TgResponse, TgUpdate};
+use telegram_interface::{Api, TgInitialize, TgResponse, TgUpdate};
 
 // use telegram_interface::api::{Api, TgInitialize, TgResponse, TgUpdate};
 
