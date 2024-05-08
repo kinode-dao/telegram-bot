@@ -3,7 +3,7 @@ use frankenstein::{MethodResponse, Update};
 use kinode_process_lib::{
     await_message, call_init, get_blob,
     http::{HttpClientError, HttpClientResponse},
-    println, Address, Message, Request,
+    println, Address, Message, Request, Response
 };
 
 mod structs;
