@@ -17,9 +17,6 @@ static BASE_API_URL: &str = "https://api.telegram.org/bot";
 wit_bindgen::generate!({
     path: "wit",
     world: "process",
-    exports: {
-        world: Component,
-    },
 });
 
 use telegram_interface::{TgRequest, TgResponse, TgUpdate};
