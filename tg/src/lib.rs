@@ -62,6 +62,7 @@ fn handle_request(
                     allowed_updates: None,
                 };
                 request_no_wait(&state.api_url, "getUpdates", Some(updates_params))?;
+                let _ = Response::new().body(serde_json::to_vec(&TgResponse::Ok)?).send();
             }
         }
         TgRequest::Subscribe => {
@@ -70,6 +71,7 @@ fn handle_request(
                     state.subscribers.push(source.clone());
                 }
             }
+            let _ = Response::new().body(serde_json::to_vec(&TgResponse::Ok)?).send();
         }
         TgRequest::Unsubscribe => {
             if let Some(state) = state {
@@ -77,6 +79,7 @@ fn handle_request(
                     state.subscribers.remove(index);
                 }
             }
+            let _ = Response::new().body(serde_json::to_vec(&TgResponse::Ok)?).send();
         }
     }
 
@@ -155,13 +158,12 @@ fn handle_message(
         Message::Request {
             ref body, source, ..
         } => {
-            let _ = handle_request(our, state, body, &source);
+            handle_request(our, state, body, &source)
         }
         Message::Response { ref body, .. } => {
-            let _ = handle_response(state, body);
+            handle_response(state, body)
         }
     }
-    Ok(())
 }
 
 call_init!(init);

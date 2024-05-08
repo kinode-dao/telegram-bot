@@ -1,11 +1,11 @@
 {
-    "name": "tg",
-    "description": "",
+    "name": "Telegram",
+    "description": "Telegram bindings for Kinode",
     "image": "",
     "properties": {
         "package_name": "tg",
         "current_version": "0.1.0",
-        "publisher": "template.os",
+        "publisher": "appattacc.os",
         "mirrors": [],
         "code_hashes": {
             "0.1.0": ""
