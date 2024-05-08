@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use kinode_process_lib::{get_state, set_state};
+use kinode_process_lib::{get_state, set_state, Address};
 
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -7,6 +7,7 @@ pub struct State {
     pub tg_key: String,
     pub api_url: String,
     pub current_offset: u32,
+    pub subscribers: Vec<Address>,
 }
 
 impl State {

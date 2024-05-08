@@ -26,7 +26,6 @@ use telegram_interface::{TgRequest, TgResponse, TgUpdate};
 
 fn handle_request(
     our: &Address,
-    subs: &mut Vec<Address>,
     state: &mut Option<State>,
     body: &[u8],
     source: &Address,
@@ -51,6 +50,7 @@ fn handle_request(
                         tg_key: tg_initialize.token.clone(),
                         api_url: format!("{}{}", BASE_API_URL, tg_initialize.token),
                         current_offset: 0,
+                        subscribers: Vec::new(),
                     };
                     state_.save();
                     *state = Some(state_);
@@ -68,13 +68,17 @@ fn handle_request(
             }
         }
         TgRequest::Subscribe => {
-            if !subs.contains(source) {
-                subs.push(source.clone());
+            if let Some(state) = state {
+                if !state.subscribers.contains(source) {
+                    state.subscribers.push(source.clone());
+                }
             }
         }
         TgRequest::Unsubscribe => {
-            if let Some(index) = subs.iter().position(|x| x == source) {
-                subs.remove(index);
+            if let Some(state) = state {
+                if let Some(index) = state.subscribers.iter().position(|x| x == source) {
+                    state.subscribers.remove(index);
+                }
             }
         }
     }
@@ -83,7 +87,6 @@ fn handle_request(
 }
 
 fn handle_response(
-    subs: &mut Vec<Address>,
     state: &mut Option<State>,
     body: &[u8],
 ) -> anyhow::Result<()> {
@@ -102,7 +105,7 @@ fn handle_response(
             return Err(anyhow::anyhow!("unexpected Response: "));
         };
         // forward to subs
-        for sub in subs.iter() {
+        for sub in state.subscribers.iter() {
             let request = TgUpdate {
                 updates: response.result.clone(),
             };
@@ -131,7 +134,7 @@ fn handle_response(
 
         request_no_wait(&state.api_url, "getUpdates", Some(updates_params))?;
     } else {
-        for sub in subs.iter() {
+        for sub in state.subscribers.iter() {
             let error_message = format!(
                 "tg_bot, failed to serialize response: {:?}",
                 std::str::from_utf8(&body).unwrap_or("[Invalid UTF-8]")
@@ -148,7 +151,6 @@ fn handle_response(
 
 fn handle_message(
     our: &Address,
-    subs: &mut Vec<Address>,
     state: &mut Option<State>,
 ) -> anyhow::Result<()> {
     let message = await_message()?;
@@ -156,10 +158,10 @@ fn handle_message(
         Message::Request {
             ref body, source, ..
         } => {
-            let _ = handle_request(our, subs, state, body, &source);
+            let _ = handle_request(our, state, body, &source);
         }
         Message::Response { ref body, .. } => {
-            let _ = handle_response(subs, state, body);
+            let _ = handle_response(state, body);
         }
     }
     Ok(())
@@ -170,11 +172,9 @@ call_init!(init);
 fn init(our: Address) {
     println!("tg_bot: booted");
     let mut state = State::fetch();
-    // TODO: Zena: Merge state and subs
-    let mut subs: Vec<Address> = Vec::new();
 
     loop {
-        match handle_message(&our, &mut subs, &mut state) {
+        match handle_message(&our, &mut state) {
             Ok(()) => {}
             Err(e) => {
                 println!("tg: error: {:?}", e);
