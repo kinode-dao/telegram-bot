@@ -1,5 +1,6 @@
 /// API for the bot and the parent process.
-use frankenstein::{GetUpdatesParams, Update};
+// TODO: Zena: We will have to make some kind of crawler that recurses through the imported types and reliably converts them to wit. Another solution might have to work too. 
+use frankenstein::{GetFileParams, GetUpdatesParams, Message, SendMessageParams, Update};
 use serde::{Deserialize, Serialize};
 
 
@@ -8,6 +9,21 @@ pub enum TgRequest {
     RegisterApiKey(TgInitialize),
     Subscribe,
     Unsubscribe,
+    /// Download a file from telegram.
+    GetFile(GetFileParams),
+    /// Send a message to a chat.
+    SendMessage(SendMessageParams),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum TgResponse {
+    Ok, 
+    Update(TgUpdate),
+    Error(String),
+    /// Download a file from telegram
+    GetFile(Vec<u8>),
+    /// Send a message to a chat.
+    SendMessage(Message),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -16,17 +32,9 @@ pub struct TgInitialize {
     pub params: Option<GetUpdatesParams>,
 }
 
-/// Enum Request received by parent process for long-polling updates.
-#[derive(Debug, Serialize, Deserialize)]
-pub enum TgResponse {
-    Ok, 
-    Update(TgUpdate),
-    Error(String),
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TgUpdate {
     pub updates: Vec<Update>,
 }
-
 
