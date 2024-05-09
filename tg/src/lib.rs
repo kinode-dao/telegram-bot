@@ -3,7 +3,7 @@ use frankenstein::{MethodResponse, Update};
 use kinode_process_lib::{
     await_message, call_init, get_blob,
     http::{HttpClientError, HttpClientResponse},
-    println, Address, Message, Request, Response
+    println, Address, Message, Request, Response,
 };
 
 mod structs;
@@ -11,6 +11,9 @@ use structs::*;
 
 mod helpers;
 use helpers::*;
+
+mod http;
+use http::*;
 
 static BASE_API_URL: &str = "https://api.telegram.org/bot";
 
@@ -27,27 +30,27 @@ fn handle_request(
     body: &[u8],
     source: &Address,
 ) -> anyhow::Result<()> {
-    if source.node != our.node {
-        return Err(anyhow::anyhow!(
-            "got initialize request from foreign source {:?}",
-            source
-        ));
-    }
     match serde_json::from_slice::<TgRequest>(body)? {
         TgRequest::RegisterApiKey(tg_initialize) => {
             match state {
                 Some(state) => {
                     state.tg_key = tg_initialize.token.clone();
-                    state.api_url = format!("{}{}", BASE_API_URL, tg_initialize.token);
+                    state.api_url = format!("{}{}", BASE_API_URL, tg_initialize.token.clone());
                     state.current_offset = 0;
+                    state.api = Some(Api {
+                        api_url: format!("{}{}", BASE_API_URL, tg_initialize.token.clone()),
+                    });
                     state.save();
                 }
                 None => {
                     let state_ = State {
                         tg_key: tg_initialize.token.clone(),
-                        api_url: format!("{}{}", BASE_API_URL, tg_initialize.token),
+                        api_url: format!("{}{}", BASE_API_URL, tg_initialize.token.clone()),
                         current_offset: 0,
                         subscribers: Vec::new(),
+                        api: Some(Api {
+                            api_url: format!("{}{}", BASE_API_URL, tg_initialize.token.clone()),
+                        }),
                     };
                     state_.save();
                     *state = Some(state_);
@@ -62,7 +65,9 @@ fn handle_request(
                     allowed_updates: None,
                 };
                 request_no_wait(&state.api_url, "getUpdates", Some(updates_params))?;
-                let _ = Response::new().body(serde_json::to_vec(&TgResponse::Ok)?).send();
+                let _ = Response::new()
+                    .body(serde_json::to_vec(&TgResponse::Ok)?)
+                    .send();
             }
         }
         TgRequest::Subscribe => {
@@ -71,7 +76,9 @@ fn handle_request(
                     state.subscribers.push(source.clone());
                 }
             }
-            let _ = Response::new().body(serde_json::to_vec(&TgResponse::Ok)?).send();
+            let _ = Response::new()
+                .body(serde_json::to_vec(&TgResponse::Ok)?)
+                .send();
         }
         TgRequest::Unsubscribe => {
             if let Some(state) = state {
@@ -79,95 +86,85 @@ fn handle_request(
                     state.subscribers.remove(index);
                 }
             }
-            let _ = Response::new().body(serde_json::to_vec(&TgResponse::Ok)?).send();
+            let _ = Response::new()
+                .body(serde_json::to_vec(&TgResponse::Ok)?)
+                .send();
         }
-    }
-
-    Ok(())
-}
-
-fn handle_response(
-    state: &mut Option<State>,
-    body: &[u8],
-) -> anyhow::Result<()> {
-    let HttpClientResponse::Http(_) =
-        serde_json::from_slice::<Result<HttpClientResponse, HttpClientError>>(&body)??
-    else {
-        return Err(anyhow::anyhow!("unexpected Response: "));
-    };
-    let Some(state) = state else {
-        return Err(anyhow::anyhow!("state not initialized"));
-    };
-
-    if let Some(blob) = get_blob() {
-        let Ok(response) = serde_json::from_slice::<MethodResponse<Vec<Update>>>(&blob.bytes)
-        else {
-            return Err(anyhow::anyhow!("unexpected Response: "));
-        };
-        // forward to subs
-        for sub in state.subscribers.iter() {
-            let request = TgUpdate {
-                updates: response.result.clone(),
+        TgRequest::GetFile(get_file_params) => {
+            let Some(state) = state else {
+                return Err(anyhow::anyhow!("state not initialized"));
+            };
+            let Some(api) = state.api else {
+                return Err(anyhow::anyhow!("api not initialized"));
             };
 
-            let tg_response = TgResponse::Update(request);
-            let _ = Request::new()
-                .target(sub.clone())
-                .body(serde_json::to_vec(&tg_response)?)
-                .send();
-        }
-
-        // set current_offset based on the response, keep same if no updates
-        let next_offset = response
-            .result
-            .last()
-            .map(|u| u.update_id + 1)
-            .unwrap_or(state.current_offset);
-        state.current_offset = next_offset;
-
-        let updates_params = frankenstein::GetUpdatesParams {
-            offset: Some(state.current_offset as i64),
-            limit: None,
-            timeout: Some(15),
-            allowed_updates: None,
-        };
-
-        request_no_wait(&state.api_url, "getUpdates", Some(updates_params))?;
-    } else {
-        for sub in state.subscribers.iter() {
-            let error_message = format!(
-                "tg_bot, failed to serialize response: {:?}",
-                std::str::from_utf8(&body).unwrap_or("[Invalid UTF-8]")
+            let file_path = api.get_file(&get_file_params).ok()?.result.file_path?;
+            let download_url = format!(
+                "{}{}/{}",
+                BASE_API_URL,
+                state.tg_key.clone(),
+                file_path 
             );
-            let tg_response = TgResponse::Error(error_message);
-            let _ = Request::new()
-                .target(sub.clone())
-                .body(serde_json::to_vec(&tg_response)?)
-                .send();
+
+            let outgoing_request = http::OutgoingHttpRequest {
+                method: "GET".to_string(),
+                version: None,
+                url: download_url,
+                headers: HashMap::new(),
+            };
+
+            let body_bytes = json!(http::HttpClientAction::Http(outgoing_request))
+                .to_string()
+                .as_bytes()
+                .to_vec();
+
+            Request::new()
+                .target(Address::new(
+                    "our",
+                    ProcessId::new(Some("http_client"), "distro", "sys"),
+                ))
+                .body(body_bytes)
+                .context(vec![0])
+                .expects_response(30)
+                .send()
+                .ok();
+        }
+        TgRequest::SendMessage(send_message_params) => {
+            // TODO:
         }
     }
+
     Ok(())
 }
 
-fn handle_message(
-    our: &Address,
-    state: &mut Option<State>,
-) -> anyhow::Result<()> {
-    let message = await_message()?;
+fn handle_inner_message(our: &Address, state: &mut Option<State>) -> anyhow::Result<()> {
     match message {
         Message::Request {
             ref body, source, ..
-        } => {
-            handle_request(our, state, body, &source)
+        } => handle_request(our, state, body, &source),
+        Message::Response { ref body, .. } => Ok(()),
+    }
+}
+
+
+fn handle_message(our: &Address, state: &mut Option<State>) -> anyhow::Result<()> {
+    let message = await_message()?;
+    if message.source().node != our.node {
+        return Err(anyhow::anyhow!(
+            "got request from foreign source {:?}",
+            message.source()
+        ));
+    }
+
+    match message.source().process.to_string().as_str() {
+        "http_server:distro:sys" | "http_client:distro:sys" => {
+            handle_http_message(&message, state)
         }
-        Message::Response { ref body, .. } => {
-            handle_response(state, body)
-        }
+        _ => handle_inner_message(our, state)
     }
 }
 
 call_init!(init);
-
 fn init(our: Address) {
     println!("tg_bot: booted");
     let mut state = State::fetch();

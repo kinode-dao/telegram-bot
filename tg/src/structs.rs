@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use kinode_process_lib::{get_state, set_state, Address};
-
+use crate::Api;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct State {
@@ -8,6 +8,7 @@ pub struct State {
     pub api_url: String,
     pub current_offset: u32,
     pub subscribers: Vec<Address>,
+    pub api: Option<Api>,
 }
 
 impl State {
