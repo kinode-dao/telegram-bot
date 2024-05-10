@@ -20,8 +20,8 @@ pub enum TgResponse {
     Ok, 
     Update(TgUpdate),
     Error(String),
-    /// Download a file from telegram
-    GetFile(Vec<u8>),
+    /// Download a file from telegram. Blobs included
+    GetFile,
     /// Send a message to a chat.
     SendMessage(Message),
 }
