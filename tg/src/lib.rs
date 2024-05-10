@@ -126,8 +126,17 @@ fn handle_request(
             }
         }
 
-        TgRequest::SendMessage(_send_message_params) => {
-            // TODO:
+        TgRequest::SendMessage(send_message_params) => {
+            let Some(state) = state else {
+                return Err(anyhow::anyhow!("state not initialized"));
+            };
+            let Some(ref api) = state.api else {
+                return Err(anyhow::anyhow!("api not initialized"));
+            };
+            let message = api.send_message(&send_message_params)?.result;
+            let _ = Response::new()
+                .body(serde_json::to_vec(&TgResponse::SendMessage(message))?)
+                .send();
         }
     }
 
