@@ -3,10 +3,9 @@ use frankenstein::TelegramApi;
 use kinode_process_lib::{
     await_message, call_init,
     http::{OutgoingHttpRequest, HttpClientAction},
-    println, Address, Message, Request, Response, ProcessId, get_blob
+    println, Address, Message, Request, Response, get_blob
 };
 use std::collections::HashMap;
-use serde_json::json;
 
 mod structs;
 use structs::*;
@@ -119,8 +118,8 @@ fn handle_request(
                 .body(body_bytes)
                 .send_and_await_response(30)??;
             if let Some(blob) = get_blob() {
-                Response::new()
-                    .body(serde_json::to_vec(&TgResponse::GetFile())?)
+                let _ = Response::new()
+                    .body(serde_json::to_vec(&TgResponse::GetFile)?)
                     .blob(blob)
                     .send();
                 // TODO: Do this async
