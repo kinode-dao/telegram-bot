@@ -3,7 +3,7 @@ use frankenstein::TelegramApi;
 use kinode_process_lib::{
     await_message, call_init,
     http::{OutgoingHttpRequest, HttpClientAction},
-    println, Address, Message, Request, Response, ProcessId
+    println, Address, Message, Request, Response, ProcessId, get_blob
 };
 use std::collections::HashMap;
 use serde_json::json;
@@ -104,7 +104,7 @@ fn handle_request(
                 .result
                 .file_path
                 .ok_or_else(|| anyhow::anyhow!("file_path not found"))?;
-            let download_url = format!("{}{}/{}", BASE_API_URL, state.tg_key.clone(), file_path);
+            let download_url = format!("https://api.telegram.org/file/bot{}/{}", state.tg_key.clone(), file_path);
 
             let outgoing_request = OutgoingHttpRequest {
                 method: "GET".to_string(),
@@ -112,24 +112,18 @@ fn handle_request(
                 url: download_url,
                 headers: HashMap::new(),
             };
-
-            let body_bytes = json!(HttpClientAction::Http(outgoing_request))
-                .to_string()
-                .as_bytes()
-                .to_vec();
+            let body_bytes = serde_json::to_vec(&HttpClientAction::Http(outgoing_request))?;
 
             println!("Sending request to http_client");
-            Request::new()
-                .target(Address::new(
-                    "our",
-                    ProcessId::new(Some("http_client"), "distro", "sys"),
-                ))
+            let response = Request::to(("our", "http_client", "distro", "sys"))
                 .body(body_bytes)
-                .inherit(true)
-                .expects_response(30)
-                .send()
-                .ok();
+                .send_and_await_response(30)??;
+            if let Some(blob) = get_blob() {
+                // TODO: Send a new response with the bytes as blob
+                // TODO: Do this async
+            }
         }
+
         TgRequest::SendMessage(_send_message_params) => {
             // TODO:
         }
