@@ -115,11 +115,14 @@ fn handle_request(
             let body_bytes = serde_json::to_vec(&HttpClientAction::Http(outgoing_request))?;
 
             println!("Sending request to http_client");
-            let response = Request::to(("our", "http_client", "distro", "sys"))
+            let _ = Request::to(("our", "http_client", "distro", "sys"))
                 .body(body_bytes)
                 .send_and_await_response(30)??;
             if let Some(blob) = get_blob() {
-                // TODO: Send a new response with the bytes as blob
+                Response::new()
+                    .body(serde_json::to_vec(&TgResponse::GetFile())?)
+                    .blob(blob)
+                    .send();
                 // TODO: Do this async
             }
         }
