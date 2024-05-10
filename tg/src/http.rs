@@ -1,14 +1,18 @@
 use frankenstein::{MethodResponse, Update};
 
 use kinode_process_lib::{
-    await_message, call_init, get_blob,
+    get_blob,
     http::{HttpClientError, HttpClientResponse},
-    println, Address, Message, Request, Response,
+    Message, Request, 
 };
+use crate::State;
+use crate::TgResponse;
+use crate::request_no_wait;
+use crate::TgUpdate;
 
 pub fn handle_http_message(message: &Message, state: &mut Option<State>) -> anyhow::Result<()> {
     match message {
-        Message::Request { ref body, .. } => Ok(()),
+        Message::Request { .. } => Ok(()),
         Message::Response {
             ref body,
             ref context,
@@ -77,28 +81,29 @@ fn handle_tg_update(state: &mut Option<State>, body: &[u8]) -> anyhow::Result<()
     Ok(())
 }
 
-fn receive_downloaded_audio() -> anyhow::Result<()> {
-    let bytes = get_blob()?.bytes;
-    // TODO: Just send a response with those bytes bro
-    Ok(())
-}
+// fn receive_downloaded_audio() -> anyhow::Result<()> {
+//     let bytes = get_blob()?.bytes;
+//     // TODO: Just send a response with those bytes bro
+//     Ok(())
+// }
 
 fn handle_http_response(
     state: &mut Option<State>,
     body: &[u8],
-    context: &Option<Vec<u8>>,
+    _context: &Option<Vec<u8>>,
 ) -> anyhow::Result<()> {
-    match context {
-        Some(context) => {
-            match context {
-                0 => receive_downloaded_audio(),
-                _ => anyhow::anyhow!("unexpected context"),
-            }
-            let Some(state) = state else {
-                return Err(anyhow::anyhow!("state not initialized"));
-            };
-            Ok(())
-        }
-        None => handle_tg_update(state, body),
-    }
+    // match context {
+    //     Some(context) => {
+    //         // match context {
+    //         //     0 => receive_downloaded_audio(),
+    //         //     _ => return Err(anyhow::anyhow!("unexpected context")),
+    //         // }
+    //         let Some(state) = state else {
+    //             return Err(anyhow::anyhow!("state not initialized"));
+    //         };
+    //         Ok(())
+    //     }
+    //     None => handle_tg_update(state, body),
+    // }
+    handle_tg_update(state, body)
 }

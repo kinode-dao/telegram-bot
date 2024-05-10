@@ -1,10 +1,12 @@
-use frankenstein::{MethodResponse, Update};
+use frankenstein::TelegramApi;
 
 use kinode_process_lib::{
-    await_message, call_init, get_blob,
-    http::{HttpClientError, HttpClientResponse},
-    println, Address, Message, Request, Response,
+    await_message, call_init,
+    http::{OutgoingHttpRequest, HttpClientAction},
+    println, Address, Message, Request, Response, ProcessId
 };
+use std::collections::HashMap;
+use serde_json::json;
 
 mod structs;
 use structs::*;
@@ -25,7 +27,6 @@ wit_bindgen::generate!({
 use telegram_interface::{TgRequest, TgResponse, TgUpdate};
 
 fn handle_request(
-    our: &Address,
     state: &mut Option<State>,
     body: &[u8],
     source: &Address,
@@ -94,42 +95,42 @@ fn handle_request(
             let Some(state) = state else {
                 return Err(anyhow::anyhow!("state not initialized"));
             };
-            let Some(api) = state.api else {
+            let Some(ref api) = state.api else {
                 return Err(anyhow::anyhow!("api not initialized"));
             };
 
-            let file_path = api.get_file(&get_file_params).ok()?.result.file_path?;
-            let download_url = format!(
-                "{}{}/{}",
-                BASE_API_URL,
-                state.tg_key.clone(),
-                file_path 
-            );
+            let file_path = api
+                .get_file(&get_file_params)?
+                .result
+                .file_path
+                .ok_or_else(|| anyhow::anyhow!("file_path not found"))?;
+            let download_url = format!("{}{}/{}", BASE_API_URL, state.tg_key.clone(), file_path);
 
-            let outgoing_request = http::OutgoingHttpRequest {
+            let outgoing_request = OutgoingHttpRequest {
                 method: "GET".to_string(),
                 version: None,
                 url: download_url,
                 headers: HashMap::new(),
             };
 
-            let body_bytes = json!(http::HttpClientAction::Http(outgoing_request))
+            let body_bytes = json!(HttpClientAction::Http(outgoing_request))
                 .to_string()
                 .as_bytes()
                 .to_vec();
 
+            println!("Sending request to http_client");
             Request::new()
                 .target(Address::new(
                     "our",
                     ProcessId::new(Some("http_client"), "distro", "sys"),
                 ))
                 .body(body_bytes)
-                .context(vec![0])
+                .inherit(true)
                 .expects_response(30)
                 .send()
                 .ok();
         }
-        TgRequest::SendMessage(send_message_params) => {
+        TgRequest::SendMessage(_send_message_params) => {
             // TODO:
         }
     }
@@ -137,15 +138,14 @@ fn handle_request(
     Ok(())
 }
 
-fn handle_inner_message(our: &Address, state: &mut Option<State>) -> anyhow::Result<()> {
+fn handle_inner_message(message: &Message, state: &mut Option<State>) -> anyhow::Result<()> {
     match message {
         Message::Request {
             ref body, source, ..
-        } => handle_request(our, state, body, &source),
-        Message::Response { ref body, .. } => Ok(()),
+        } => handle_request(state, body, &source),
+        Message::Response { .. } => Ok(()),
     }
 }
-
 
 fn handle_message(our: &Address, state: &mut Option<State>) -> anyhow::Result<()> {
     let message = await_message()?;
@@ -157,10 +157,8 @@ fn handle_message(our: &Address, state: &mut Option<State>) -> anyhow::Result<()
     }
 
     match message.source().process.to_string().as_str() {
-        "http_server:distro:sys" | "http_client:distro:sys" => {
-            handle_http_message(&message, state)
-        }
-        _ => handle_inner_message(our, state)
+        "http_server:distro:sys" | "http_client:distro:sys" => handle_http_message(&message, state),
+        _ => handle_inner_message(&message, state),
     }
 }
 
