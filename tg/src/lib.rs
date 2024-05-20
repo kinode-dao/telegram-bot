@@ -30,10 +30,11 @@ fn handle_request(
     body: &[u8],
     source: &Address,
 ) -> anyhow::Result<()> {
+    println!("tg: handle_request");
     match serde_json::from_slice::<TgRequest>(body)? {
         TgRequest::RegisterApiKey(tg_initialize) => {
-            match state {
-                Some(state) => {
+            println!("tg: register api key");
+            if let Some(state) = state {
                     state.tg_key = tg_initialize.token.clone();
                     state.api_url = format!("{}{}", BASE_API_URL, tg_initialize.token.clone());
                     state.current_offset = 0;
@@ -41,20 +42,6 @@ fn handle_request(
                         api_url: format!("{}{}", BASE_API_URL, tg_initialize.token.clone()),
                     });
                     state.save();
-                }
-                None => {
-                    let state_ = State {
-                        tg_key: tg_initialize.token.clone(),
-                        api_url: format!("{}{}", BASE_API_URL, tg_initialize.token.clone()),
-                        current_offset: 0,
-                        subscribers: Vec::new(),
-                        api: Some(Api {
-                            api_url: format!("{}{}", BASE_API_URL, tg_initialize.token.clone()),
-                        }),
-                    };
-                    state_.save();
-                    *state = Some(state_);
-                }
             }
 
             if let Some(ref state) = state {
@@ -71,16 +58,20 @@ fn handle_request(
             }
         }
         TgRequest::Subscribe => {
+            println!("tg: subscribe");
+            println!("tg: state: {:?}", state);
             if let Some(state) = state {
                 if !state.subscribers.contains(source) {
                     state.subscribers.push(source.clone());
                 }
+                println!("tg: subscribers: {:?}", state.subscribers);
             }
             let _ = Response::new()
                 .body(serde_json::to_vec(&TgResponse::Ok)?)
                 .send();
         }
         TgRequest::Unsubscribe => {
+            println!("tg: unsubscribe");
             if let Some(state) = state {
                 if let Some(index) = state.subscribers.iter().position(|x| x == source) {
                     state.subscribers.remove(index);
@@ -91,6 +82,7 @@ fn handle_request(
                 .send();
         }
         TgRequest::GetFile(get_file_params) => {
+            println!("tg: get file");
             let Some(state) = state else {
                 return Err(anyhow::anyhow!("state not initialized"));
             };
@@ -113,7 +105,7 @@ fn handle_request(
             };
             let body_bytes = serde_json::to_vec(&HttpClientAction::Http(outgoing_request))?;
 
-            println!("Sending request to http_client");
+            println!("tgbot: Sending request to http_client");
             let _ = Request::to(("our", "http_client", "distro", "sys"))
                 .body(body_bytes)
                 .send_and_await_response(30)??;
@@ -127,6 +119,8 @@ fn handle_request(
         }
 
         TgRequest::SendMessage(send_message_params) => {
+            println!("{:?}", send_message_params.clone());
+            println!("tg: send message");
             let Some(state) = state else {
                 return Err(anyhow::anyhow!("state not initialized"));
             };
@@ -134,16 +128,21 @@ fn handle_request(
                 return Err(anyhow::anyhow!("api not initialized"));
             };
             let message = api.send_message(&send_message_params)?.result;
+            println!("{:?}", message.clone());
+            println!("{:?}", serde_json::to_vec(&TgResponse::SendMessage(message.clone()))?);
             let _ = Response::new()
                 .body(serde_json::to_vec(&TgResponse::SendMessage(message))?)
                 .send();
         }
     }
-
+    if let Some(state) = state {
+        println!("tg: subscribers later: {:?}", state.subscribers);
+    }
     Ok(())
 }
 
 fn handle_inner_message(message: &Message, state: &mut Option<State>) -> anyhow::Result<()> {
+    println!("tg: handle inner message");
     match message {
         Message::Request {
             ref body, source, ..
@@ -153,26 +152,49 @@ fn handle_inner_message(message: &Message, state: &mut Option<State>) -> anyhow:
 }
 
 fn handle_message(our: &Address, state: &mut Option<State>) -> anyhow::Result<()> {
+
     let message = await_message()?;
+    println!("tg: got message");
     if message.source().node != our.node {
         return Err(anyhow::anyhow!(
             "got request from foreign source {:?}",
             message.source()
         ));
     }
-
+    println!("tg: match message");
     match message.source().process.to_string().as_str() {
-        "http_server:distro:sys" | "http_client:distro:sys" => handle_http_message(&message, state),
-        _ => handle_inner_message(&message, state),
+        "http_server:distro:sys" | "http_client:distro:sys" => {
+            println!("tg: will run handle http message");
+            handle_http_message(&message, state)
+        },
+        _ => {
+            println!("tg: will run handle inner message");
+            handle_inner_message(&message, state)
+        },
     }
 }
 
 call_init!(init);
 fn init(our: Address) {
     println!("tg_bot: booted");
+
     let mut state = State::fetch();
 
+    state =
+        if let None = state {
+            println!("tg: state doesnt exist");
+            let new_state = State::initialize_empty();
+            new_state.save();
+            Some(new_state)
+        } else {
+            state
+        };
+
     loop {
+        println!("tg: handle message");
+        if let Some(s) = &state {
+            println!("tg: subscribers when handling msg: {:?}", s.subscribers);
+        }
         match handle_message(&our, &mut state) {
             Ok(()) => {}
             Err(e) => {

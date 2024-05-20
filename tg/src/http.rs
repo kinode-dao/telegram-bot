@@ -1,7 +1,7 @@
 use frankenstein::{MethodResponse, Update};
 
 use kinode_process_lib::{
-    get_blob,
+    get_blob, println,
     http::{HttpClientError, HttpClientResponse},
     Message, Request, 
 };
@@ -11,6 +11,7 @@ use crate::request_no_wait;
 use crate::TgUpdate;
 
 pub fn handle_http_message(message: &Message, state: &mut Option<State>) -> anyhow::Result<()> {
+    println!("tg: handle_http_message");
     match message {
         Message::Request { .. } => Ok(()),
         Message::Response {
@@ -22,22 +23,28 @@ pub fn handle_http_message(message: &Message, state: &mut Option<State>) -> anyh
 }
 
 fn handle_tg_update(state: &mut Option<State>, body: &[u8]) -> anyhow::Result<()> {
+    println!("tg: handle_tg_update");
+    
     let HttpClientResponse::Http(_) =
         serde_json::from_slice::<Result<HttpClientResponse, HttpClientError>>(&body)??
     else {
+        println!("unexpected response 1");
         return Err(anyhow::anyhow!("unexpected Response: "));
     };
+    println!("tg: got http client response");
     let Some(state) = state else {
-        return Err(anyhow::anyhow!("state not initialized"));
+        return Err(anyhow::anyhow!("tg: state not initialized"));
     };
-
     if let Some(blob) = get_blob() {
         let Ok(response) = serde_json::from_slice::<MethodResponse<Vec<Update>>>(&blob.bytes)
         else {
+            println!("unexpected response 2");
             return Err(anyhow::anyhow!("unexpected Response: "));
         };
         // forward to subs
+        println!("tg: forwarding to subs");
         for sub in state.subscribers.iter() {
+            println!("  - {:?}", sub);
             let request = TgUpdate {
                 updates: response.result.clone(),
             };
@@ -78,6 +85,7 @@ fn handle_tg_update(state: &mut Option<State>, body: &[u8]) -> anyhow::Result<()
                 .send();
         }
     }
+    println!("tg: done");
     Ok(())
 }
 

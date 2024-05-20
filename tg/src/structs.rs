@@ -24,4 +24,14 @@ impl State {
         let serialized_state = bincode::serialize(self).expect("Failed to serialize state");
         set_state(&serialized_state);
     }
+
+    pub fn initialize_empty() -> State {
+        State {
+            tg_key: String::new(),
+            api_url: String::new(),
+            current_offset: 0,
+            subscribers: Vec::new(),
+            api: None,
+        }
+    }
 }
