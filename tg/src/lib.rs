@@ -3,7 +3,7 @@ use frankenstein::TelegramApi;
 use kinode_process_lib::{
     await_message, call_init,
     http::{OutgoingHttpRequest, HttpClientAction},
-    println, Address, Message, Request, Response, get_blob
+    /*println*/, Address, Message, Request, Response, get_blob
 };
 use std::collections::HashMap;
 
