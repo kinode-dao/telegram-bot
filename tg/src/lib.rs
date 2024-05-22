@@ -3,7 +3,7 @@ use frankenstein::TelegramApi;
 use kinode_process_lib::{
     await_message, call_init,
     http::{OutgoingHttpRequest, HttpClientAction},
-    /*println*/, Address, Message, Request, Response, get_blob
+    /*println, */Address, Message, Request, Response, get_blob
 };
 use std::collections::HashMap;
 
@@ -35,13 +35,13 @@ fn handle_request(
         TgRequest::RegisterApiKey(tg_initialize) => {
             println!("tg: register api key");
             if let Some(state) = state {
-                    state.tg_key = tg_initialize.token.clone();
-                    state.api_url = format!("{}{}", BASE_API_URL, tg_initialize.token.clone());
-                    state.current_offset = 0;
-                    state.api = Some(Api {
-                        api_url: format!("{}{}", BASE_API_URL, tg_initialize.token.clone()),
-                    });
-                    state.save();
+                state.tg_key = tg_initialize.token.clone();
+                state.api_url = format!("{}{}", BASE_API_URL, tg_initialize.token.clone());
+                state.current_offset = 0;
+                state.api = Some(Api {
+                    api_url: format!("{}{}", BASE_API_URL, tg_initialize.token.clone()),
+                });
+                state.save();
             }
 
             if let Some(ref state) = state {
@@ -63,6 +63,7 @@ fn handle_request(
             if let Some(state) = state {
                 if !state.subscribers.contains(source) {
                     state.subscribers.push(source.clone());
+                    state.save();
                 }
                 println!("tg: subscribers: {:?}", state.subscribers);
             }
@@ -75,6 +76,7 @@ fn handle_request(
             if let Some(state) = state {
                 if let Some(index) = state.subscribers.iter().position(|x| x == source) {
                     state.subscribers.remove(index);
+                    state.save();
                 }
             }
             let _ = Response::new()
