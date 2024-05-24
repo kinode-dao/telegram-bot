@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use kinode_process_lib::{get_state, set_state, Address};
+use kinode_process_lib::{get_state, set_state, Address, http::bind_ws_path};
 use crate::Api;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -9,6 +9,7 @@ pub struct State {
     pub current_offset: u32,
     pub subscribers: Vec<Address>,
     pub api: Option<Api>,
+    pub our_channel_id: u32,
 }
 
 impl State {
@@ -32,6 +33,23 @@ impl State {
             current_offset: 0,
             subscribers: Vec::new(),
             api: None,
+            our_channel_id: 0,
         }
     }
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NewMessageUpdate {
+    pub chat_id: i64,
+    pub message_id: i32,
+    pub date: u64,
+    pub username: String,
+    pub text: String,
+}
+
+// SQL
+// chat id i64
+// message id i32
+// date u64
+// username Option(String)
+// text Option(String)

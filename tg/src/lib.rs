@@ -2,8 +2,9 @@ use frankenstein::TelegramApi;
 
 use kinode_process_lib::{
     await_message, call_init,
-    http::{OutgoingHttpRequest, HttpClientAction},
-    /*println, */Address, Message, Request, Response, get_blob
+    http::{OutgoingHttpRequest, HttpClientAction, bind_ws_path, WsMessageType, send_ws_push},
+    println, Address, Message, Request, Response, get_blob,
+    sqlite
 };
 use std::collections::HashMap;
 
@@ -26,11 +27,13 @@ wit_bindgen::generate!({
 use telegram_interface::{TgRequest, TgResponse, TgUpdate};
 
 fn handle_request(
+    our: &Address,
     state: &mut Option<State>,
     body: &[u8],
     source: &Address,
 ) -> anyhow::Result<()> {
     println!("tg: handle_request");
+
     match serde_json::from_slice::<TgRequest>(body)? {
         TgRequest::RegisterApiKey(tg_initialize) => {
             println!("tg: register api key");
@@ -121,8 +124,6 @@ fn handle_request(
         }
 
         TgRequest::SendMessage(send_message_params) => {
-            println!("{:?}", send_message_params.clone());
-            println!("tg: send message");
             let Some(state) = state else {
                 return Err(anyhow::anyhow!("state not initialized"));
             };
@@ -130,8 +131,39 @@ fn handle_request(
                 return Err(anyhow::anyhow!("api not initialized"));
             };
             let message = api.send_message(&send_message_params)?.result;
-            println!("{:?}", message.clone());
-            println!("{:?}", serde_json::to_vec(&TgResponse::SendMessage(message.clone()))?);
+
+            let username: String = match &message.from {
+                Some(from) => 
+                    if let Some(username) = &from.username {
+                        username.to_string()
+                    } else {"Unknown".to_string()}
+                None => "Unknown".to_string(),
+            };
+            let text: String = match &message.text {
+                Some(text) => text.to_string(),
+                None => "Unknown".to_string(),
+            };
+
+            let blob = data_to_ws_update_blob(
+                message.chat.id,
+                message.message_id,
+                message.date,
+                username,
+                text
+            );
+            send_ws_push(state.our_channel_id, WsMessageType::Text, blob);
+
+            // println!("message: {:#?}", &message);
+            // insert_row(our, message.chat.id, message.message_id, message.date, message.from.unwrap().username.clone().unwrap().clone(), message.text.clone().unwrap().clone());
+    // println!("tg: chatid: {}", &message.chat.id);
+// if let Some(from) = &message.from {
+//     println!("tg: from: {:?}", from.username); //TODO error handling when None
+// }
+// println!("tg: chat: {}", &message.message_id);
+// println!("tg: chat: {}", &message.date);
+// println!("tg: chat: {:?}", &message.text); // TODO error handling when None
+// // println!("tg: chat: {}", msg.voice); TODO
+
             let _ = Response::new()
                 .body(serde_json::to_vec(&TgResponse::SendMessage(message))?)
                 .send();
@@ -143,17 +175,24 @@ fn handle_request(
     Ok(())
 }
 
-fn handle_inner_message(message: &Message, state: &mut Option<State>) -> anyhow::Result<()> {
+fn handle_inner_message(
+    our: &Address,
+    message: &Message,
+    state: &mut Option<State>,
+) -> anyhow::Result<()> {
     println!("tg: handle inner message");
     match message {
         Message::Request {
             ref body, source, ..
-        } => handle_request(state, body, &source),
+        } => handle_request(our, state, body, &source),
         Message::Response { .. } => Ok(()),
     }
 }
 
-fn handle_message(our: &Address, state: &mut Option<State>) -> anyhow::Result<()> {
+fn handle_message(
+    our: &Address,
+    state: &mut Option<State>,
+) -> anyhow::Result<()> {
 
     let message = await_message()?;
     println!("tg: got message");
@@ -167,11 +206,11 @@ fn handle_message(our: &Address, state: &mut Option<State>) -> anyhow::Result<()
     match message.source().process.to_string().as_str() {
         "http_server:distro:sys" | "http_client:distro:sys" => {
             println!("tg: will run handle http message");
-            handle_http_message(&message, state)
+            handle_http_message(our, &message, state)
         },
         _ => {
             println!("tg: will run handle inner message");
-            handle_inner_message(&message, state)
+            handle_inner_message(our, &message, state)
         },
     }
 }
@@ -179,6 +218,9 @@ fn handle_message(our: &Address, state: &mut Option<State>) -> anyhow::Result<()
 call_init!(init);
 fn init(our: Address) {
     println!("tg_bot: booted");
+
+    // try with true in second param
+    bind_ws_path("/", true, false).unwrap();
 
     let mut state = State::fetch();
 
@@ -191,6 +233,20 @@ fn init(our: Address) {
         } else {
             state
         };
+
+    // let db = sqlite::open(our.package_id(), "tg_chat", None).unwrap();
+    // let create_table_statement =
+    //     r#"CREATE TABLE IF NOT EXISTS tg_chat (
+    //         chat_id INTEGER,
+    //         message_id INTEGER PRIMARY KEY,
+    //         date INTEGER,
+    //         username TEXT,
+    //         text TEXT
+    //     );"#
+    //     .to_string();
+    // db.write(create_table_statement, vec![], None);
+
+
 
     loop {
         println!("tg: handle message");
@@ -205,3 +261,6 @@ fn init(our: Address) {
         };
     }
 }
+
+
+

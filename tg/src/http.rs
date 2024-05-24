@@ -1,19 +1,62 @@
-use frankenstein::{MethodResponse, Update};
+use frankenstein::{MethodResponse, Update, UpdateContent};
 
 use kinode_process_lib::{
-    get_blob, /*println, */
-    http::{HttpClientError, HttpClientResponse},
-    Message, Request, 
+    get_blob, println,
+    http::{HttpClientError, HttpClientResponse, WsMessageType, send_ws_push, HttpServerRequest},
+    Message, Request, LazyLoadBlob, Address
 };
+
+use serde::{Serialize, Deserialize};
+
 use crate::State;
 use crate::TgResponse;
 use crate::request_no_wait;
+use crate::data_to_ws_update_blob;
 use crate::TgUpdate;
 
-pub fn handle_http_message(message: &Message, state: &mut Option<State>) -> anyhow::Result<()> {
-    println!("tg: handle_http_message");
+pub fn handle_http_server_request(
+    our: &Address,
+    source: &Address,
+    body: &[u8],
+    state: &mut Option<State>,
+) -> anyhow::Result<()> {
+    println!("tg: handle http server request");
+    let Ok(server_request) = serde_json::from_slice::<HttpServerRequest>(body) else {
+        return Ok(());
+    };
+
+    match server_request {
+        HttpServerRequest::WebSocketOpen { channel_id, .. } => {
+            println!("web socket open");
+            if let Some(state) = state {
+                state.our_channel_id = channel_id;
+                state.save();
+            }
+            Ok(())
+        }
+        _ => Ok(())
+    }
+}
+
+pub fn handle_http_message(
+    our: &Address,
+    message: &Message,
+    state: &mut Option<State>,
+) -> anyhow::Result<()> {
+    println!("tg: handle http message");
+    
     match message {
-        Message::Request { .. } => Ok(()),
+        Message::Request { 
+            ref body,
+            ref source,
+            ..
+        } => {
+            handle_http_server_request(our, source, body, state);
+            if let Some(state) = state {
+                println!("tg: our_channel_id: {:?}", state.our_channel_id);
+            }
+            Ok(())
+        },
         Message::Response {
             ref body,
             ref context,
@@ -22,7 +65,10 @@ pub fn handle_http_message(message: &Message, state: &mut Option<State>) -> anyh
     }
 }
 
-fn handle_tg_update(state: &mut Option<State>, body: &[u8]) -> anyhow::Result<()> {
+fn handle_tg_update(
+    state: &mut Option<State>,
+    body: &[u8],
+) -> anyhow::Result<()> {
     println!("tg: handle_tg_update");
     
     let HttpClientResponse::Http(_) =
@@ -41,10 +87,35 @@ fn handle_tg_update(state: &mut Option<State>, body: &[u8]) -> anyhow::Result<()
             println!("unexpected response 2");
             return Err(anyhow::anyhow!("unexpected Response: "));
         };
+        
+        // if &response.result.len() != 0 {
+        if let Some(update) = response.result.get(0) {
+            match &update.content {
+                UpdateContent::Message(msg) => {
+                    let username: String = match &msg.from {
+                        Some(from) => 
+                            if let Some(username) = &from.username {
+                                username.to_string()
+                            } else {"Unknown".to_string()}
+                        None => "Unknown".to_string(),
+                    };
+                    let text: String = match &msg.text {
+                        Some(text) => text.to_string(),
+                        None => "Unknown".to_string(),
+                    };
+                    let blob = data_to_ws_update_blob(msg.chat.id, msg.message_id, msg.date, username, text);
+                    println!("TG: pushing to WS");
+                    println!("tg: our_channel_id: {:?}", state.our_channel_id);
+                    send_ws_push(state.our_channel_id, WsMessageType::Text, blob);
+                }
+                _ => println!("tg: not a message"),
+            }
+        }
+        // }
         // forward to subs
         println!("tg: forwarding to subs");
         for sub in state.subscribers.iter() {
-            println!("  - {:?}", sub);
+            // println!("  - {:?}", sub);
             let request = TgUpdate {
                 updates: response.result.clone(),
             };
