@@ -3,8 +3,7 @@ use frankenstein::TelegramApi;
 use kinode_process_lib::{
     await_message, call_init,
     http::{OutgoingHttpRequest, HttpClientAction, bind_ws_path, WsMessageType, send_ws_push},
-    println, Address, Message, Request, Response, get_blob,
-    sqlite
+    Address, Message, Request, Response, get_blob/*, println*/
 };
 use std::collections::HashMap;
 
@@ -27,7 +26,7 @@ wit_bindgen::generate!({
 use telegram_interface::{TgRequest, TgResponse, TgUpdate};
 
 fn handle_request(
-    our: &Address,
+    _our: &Address,
     state: &mut Option<State>,
     body: &[u8],
     source: &Address,
@@ -132,6 +131,7 @@ fn handle_request(
             };
             let message = api.send_message(&send_message_params)?.result;
 
+            // TODO: there is probably a more elegant way to do this
             let username: String = match &message.from {
                 Some(from) => 
                     if let Some(username) = &from.username {
@@ -152,17 +152,6 @@ fn handle_request(
                 text
             );
             send_ws_push(state.our_channel_id, WsMessageType::Text, blob);
-
-            // println!("message: {:#?}", &message);
-            // insert_row(our, message.chat.id, message.message_id, message.date, message.from.unwrap().username.clone().unwrap().clone(), message.text.clone().unwrap().clone());
-    // println!("tg: chatid: {}", &message.chat.id);
-// if let Some(from) = &message.from {
-//     println!("tg: from: {:?}", from.username); //TODO error handling when None
-// }
-// println!("tg: chat: {}", &message.message_id);
-// println!("tg: chat: {}", &message.date);
-// println!("tg: chat: {:?}", &message.text); // TODO error handling when None
-// // println!("tg: chat: {}", msg.voice); TODO
 
             let _ = Response::new()
                 .body(serde_json::to_vec(&TgResponse::SendMessage(message))?)
@@ -233,20 +222,6 @@ fn init(our: Address) {
         } else {
             state
         };
-
-    // let db = sqlite::open(our.package_id(), "tg_chat", None).unwrap();
-    // let create_table_statement =
-    //     r#"CREATE TABLE IF NOT EXISTS tg_chat (
-    //         chat_id INTEGER,
-    //         message_id INTEGER PRIMARY KEY,
-    //         date INTEGER,
-    //         username TEXT,
-    //         text TEXT
-    //     );"#
-    //     .to_string();
-    // db.write(create_table_statement, vec![], None);
-
-
 
     loop {
         println!("tg: handle message");

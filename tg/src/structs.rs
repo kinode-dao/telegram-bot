@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use kinode_process_lib::{get_state, set_state, Address, http::bind_ws_path};
+use kinode_process_lib::{get_state, set_state, Address};
 use crate::Api;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -46,10 +46,3 @@ pub struct NewMessageUpdate {
     pub username: String,
     pub text: String,
 }
-
-// SQL
-// chat id i64
-// message id i32
-// date u64
-// username Option(String)
-// text Option(String)

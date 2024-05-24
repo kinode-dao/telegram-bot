@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use kinode_process_lib::{http::Method, http::send_request, sqlite, Address, LazyLoadBlob};
+use kinode_process_lib::{http::Method, http::send_request, LazyLoadBlob};
 use kinode_process_lib::http::send_request_await_response;
 // use kinode_process_lib::println;
 use std::collections::HashMap;
@@ -104,6 +104,18 @@ pub fn data_to_ws_update_blob(
         .to_vec(),
     }
 }
+
+    // let db = sqlite::open(our.package_id(), "tg_chat", None).unwrap();
+    // let create_table_statement =
+    //     r#"CREATE TABLE IF NOT EXISTS tg_chat (
+    //         chat_id INTEGER,
+    //         message_id INTEGER PRIMARY KEY,
+    //         date INTEGER,
+    //         username TEXT,
+    //         text TEXT
+    //     );"#
+    //     .to_string();
+    // db.write(create_table_statement, vec![], None);
 
 // pub fn message_to_params
 // pub fn insert_row(our: &Address, chat_id: i64, message_id: i32, date: u64, username: String, text: String) {

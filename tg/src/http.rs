@@ -1,12 +1,9 @@
 use frankenstein::{MethodResponse, Update, UpdateContent};
 
 use kinode_process_lib::{
-    get_blob, println,
+    get_blob, Message, Request, Address,/* println,*/
     http::{HttpClientError, HttpClientResponse, WsMessageType, send_ws_push, HttpServerRequest},
-    Message, Request, LazyLoadBlob, Address
 };
-
-use serde::{Serialize, Deserialize};
 
 use crate::State;
 use crate::TgResponse;
@@ -15,19 +12,21 @@ use crate::data_to_ws_update_blob;
 use crate::TgUpdate;
 
 pub fn handle_http_server_request(
-    our: &Address,
-    source: &Address,
+    _our: &Address,
+    _source: &Address,
     body: &[u8],
     state: &mut Option<State>,
 ) -> anyhow::Result<()> {
+
     println!("tg: handle http server request");
+
     let Ok(server_request) = serde_json::from_slice::<HttpServerRequest>(body) else {
         return Ok(());
     };
 
     match server_request {
         HttpServerRequest::WebSocketOpen { channel_id, .. } => {
-            println!("web socket open");
+            println!("tg: web socket open");
             if let Some(state) = state {
                 state.our_channel_id = channel_id;
                 state.save();
@@ -50,13 +49,7 @@ pub fn handle_http_message(
             ref body,
             ref source,
             ..
-        } => {
-            handle_http_server_request(our, source, body, state);
-            if let Some(state) = state {
-                println!("tg: our_channel_id: {:?}", state.our_channel_id);
-            }
-            Ok(())
-        },
+        } => handle_http_server_request(our, source, body, state),
         Message::Response {
             ref body,
             ref context,
@@ -88,10 +81,10 @@ fn handle_tg_update(
             return Err(anyhow::anyhow!("unexpected Response: "));
         };
         
-        // if &response.result.len() != 0 {
         if let Some(update) = response.result.get(0) {
             match &update.content {
                 UpdateContent::Message(msg) => {
+                    // TODO more elegant way to get username and text
                     let username: String = match &msg.from {
                         Some(from) => 
                             if let Some(username) = &from.username {
@@ -103,16 +96,14 @@ fn handle_tg_update(
                         Some(text) => text.to_string(),
                         None => "Unknown".to_string(),
                     };
+
                     let blob = data_to_ws_update_blob(msg.chat.id, msg.message_id, msg.date, username, text);
-                    println!("TG: pushing to WS");
-                    println!("tg: our_channel_id: {:?}", state.our_channel_id);
+                    println!("tg: pushing to WS");
                     send_ws_push(state.our_channel_id, WsMessageType::Text, blob);
                 }
                 _ => println!("tg: not a message"),
             }
         }
-        // }
-        // forward to subs
         println!("tg: forwarding to subs");
         for sub in state.subscribers.iter() {
             // println!("  - {:?}", sub);
