@@ -7,7 +7,7 @@ Provides an API and a process to build telegram bots on kinode.
 First, you need to obtain a bot token from BotFather on telegram.
 Once you have that, you can clone this repo, run `kit b` on it to build it, (instructions for installing kit [here](https://github.com/kinode-dao/kit)), and put it's wasm in your package folder as `tg.wasm`.
 
-Then put `tg/src/tg_api.rs`somewhere in your app, and make it callable by putting `mod tg_api` in your code.
+Then put [`tg/src/tg_api.rs`](https://github.com/kinode-dao/command_center/blob/jurij/command_center/src/tg_api.rs) somewhere in your app, and make it callable by putting `mod tg_api` in your code.
 
 You might have to add some dependencies used by the bot to your `Cargo.toml`:
 
