@@ -1,127 +1,275 @@
-use frankenstein::{GetUpdatesParams, MethodResponse, Update};
+use frankenstein::TelegramApi;
 
 use kinode_process_lib::{
-    await_message, call_init, get_blob,
-    http::{HttpClientError, HttpClientResponse},
-    println, Address, Message, Request,
+    await_message, call_init,
+    http::{OutgoingHttpRequest, HttpClientAction, bind_ws_path, WsMessageType, send_ws_push},
+    Address, Message, Request, Response, get_blob/*, println*/
 };
+use std::collections::HashMap;
+
+mod structs;
+use structs::*;
+
+mod helpers;
+use helpers::*;
+
+mod http;
+use http::*;
+
+static BASE_API_URL: &str = "https://api.telegram.org/bot";
 
 wit_bindgen::generate!({
-    path: "wit",
-    world: "process",
-    exports: {
-        world: Component,
-    },
+    path: "target/wit",
+    world: "process-v0",
 });
 
-mod tg_api;
-use tg_api::{Api, TgInitialize, TgResponse, TgUpdate};
+use telegram_interface::{TgRequest, TgResponse, TgUpdate};
 
-fn handle_message(
-    our: &Address,
-    api: &mut Option<Api>,
-    parent: &mut Option<Address>,
+fn handle_request(
+    _our: &Address,
+    state: &mut Option<State>,
+    body: &[u8],
+    source: &Address,
 ) -> anyhow::Result<()> {
-    let message = await_message()?;
+    println!("tg: handle_request");
 
-    match message {
-        Message::Response { body, .. } => {
-            let response =
-                serde_json::from_slice::<Result<HttpClientResponse, HttpClientError>>(&body)??;
-
-            if let HttpClientResponse::Http(_) = response {
-                if let Some(blob) = get_blob() {
-                    if let Ok(response) =
-                        serde_json::from_slice::<MethodResponse<Vec<Update>>>(&blob.bytes)
-                    {
-                        // forward to parent
-                        if let Some(parent) = parent {
-                            let request = TgUpdate {
-                                updates: response.result.clone(),
-                            };
-
-                            let tg_response = TgResponse::Update(request);
-                            let _ = Request::new()
-                                .target(parent.clone())
-                                .body(serde_json::to_vec(&tg_response)?)
-                                .send();
-                        }
-
-                        if let Some(api) = api {
-                            // set api.current_offset based on the response, keep same if no updates
-                            let next_offset = response
-                                .result
-                                .last()
-                                .map(|u| u.update_id + 1)
-                                .unwrap_or(api.current_offset);
-                            api.current_offset = next_offset;
-
-                            let updates_params = frankenstein::GetUpdatesParams {
-                                offset: Some(api.current_offset as i64),
-                                limit: None,
-                                timeout: Some(15),
-                                allowed_updates: None,
-                            };
-
-                            api.request_no_wait("getUpdates", Some(updates_params))?;
-                        }
-                    }
-                } else {
-                    if let Some(ref parent_address) = parent {
-                        let error_message = format!(
-                            "tg_bot, failed to serialize response: {:?}",
-                            std::str::from_utf8(&body).unwrap_or("[Invalid UTF-8]")
-                        );
-                        let tg_response = TgResponse::Error(error_message);
-                        let _ = Request::new()
-                            .target(parent_address.clone())
-                            .body(serde_json::to_vec(&tg_response)?)
-                            .send();
-                    }
-                }
-            } else {
-                return Err(anyhow::anyhow!("unexpected Response: "));
+    match serde_json::from_slice::<TgRequest>(body)? {
+        TgRequest::RegisterApiKey(tg_initialize) => {
+            println!("tg: register api key");
+            if let Some(state) = state {
+                state.tg_key = tg_initialize.token.clone();
+                state.api_url = format!("{}{}", BASE_API_URL, tg_initialize.token.clone());
+                state.current_offset = 0;
+                state.api = Some(Api {
+                    api_url: format!("{}{}", BASE_API_URL, tg_initialize.token.clone()),
+                });
+                state.save();
             }
-        }
-        Message::Request {
-            ref body, source, ..
-        } => match serde_json::from_slice(body)? {
-            TgInitialize { token, params } => {
-                if source.node != our.node {
-                    return Err(anyhow::anyhow!(
-                        "got initialize request from foreign source {:?}",
-                        source
-                    ));
-                }
-                let new_api = Api::new(&token, our.clone());
 
-                let updates_params = params.unwrap_or(GetUpdatesParams {
-                    offset: Some(new_api.current_offset as i64),
+            if let Some(ref state) = state {
+                let updates_params = frankenstein::GetUpdatesParams {
+                    offset: Some(state.current_offset as i64),
                     limit: None,
                     timeout: Some(15),
                     allowed_updates: None,
-                });
-
-                new_api.request_no_wait("getUpdates", Some(updates_params))?;
-
-                *parent = Some(source);
-                *api = Some(new_api);
+                };
+                request_no_wait(&state.api_url, "getUpdates", Some(updates_params))?;
+                let _ = Response::new()
+                    .body(serde_json::to_vec(&TgResponse::Ok)?)
+                    .send();
             }
-        },
+        }
+        TgRequest::Subscribe => {
+            println!("tg: subscribe");
+            println!("tg: state: {:?}", state);
+            if let Some(state) = state {
+                if !state.subscribers.contains(source) {
+                    state.subscribers.push(source.clone());
+                    state.save();
+                }
+                println!("tg: subscribers: {:?}", state.subscribers);
+            }
+            let _ = Response::new()
+                .body(serde_json::to_vec(&TgResponse::Ok)?)
+                .send();
+        }
+        TgRequest::Unsubscribe => {
+            println!("tg: unsubscribe");
+            if let Some(state) = state {
+                if let Some(index) = state.subscribers.iter().position(|x| x == source) {
+                    state.subscribers.remove(index);
+                    state.save();
+                }
+            }
+            let _ = Response::new()
+                .body(serde_json::to_vec(&TgResponse::Ok)?)
+                .send();
+        }
+        TgRequest::GetFile(get_file_params) => {
+            println!("tg: get file");
+            let Some(state) = state else {
+                return Err(anyhow::anyhow!("state not initialized"));
+            };
+            let Some(ref api) = state.api else {
+                return Err(anyhow::anyhow!("api not initialized"));
+            };
+
+            let file_path = api
+                .get_file(&get_file_params)?
+                .result
+                .file_path
+                .ok_or_else(|| anyhow::anyhow!("file_path not found"))?;
+            let download_url = format!("https://api.telegram.org/file/bot{}/{}", state.tg_key.clone(), file_path);
+
+            let outgoing_request = OutgoingHttpRequest {
+                method: "GET".to_string(),
+                version: None,
+                url: download_url,
+                headers: HashMap::new(),
+            };
+            let body_bytes = serde_json::to_vec(&HttpClientAction::Http(outgoing_request))?;
+
+            println!("tgbot: Sending request to http_client");
+            let _ = Request::to(("our", "http_client", "distro", "sys"))
+                .body(body_bytes)
+                .send_and_await_response(30)??;
+            if let Some(blob) = get_blob() {
+                let _ = Response::new()
+                    .body(serde_json::to_vec(&TgResponse::GetFile)?)
+                    .blob(blob)
+                    .send();
+                // TODO: Do this async
+            }
+        }
+
+        TgRequest::SendMessage(send_message_params) => {
+            let Some(state) = state else {
+                return Err(anyhow::anyhow!("state not initialized"));
+            };
+            let Some(ref api) = state.api else {
+                return Err(anyhow::anyhow!("api not initialized"));
+            };
+            let message = api.send_message(&send_message_params)?.result;
+
+            // TODO: there is probably a more elegant way to do this
+            let username: String = match &message.from {
+                Some(from) => 
+                    if let Some(username) = &from.username {
+                        username.to_string()
+                    } else {"Unknown".to_string()}
+                None => "Unknown".to_string(),
+            };
+            let text: String = match &message.text {
+                Some(text) => text.to_string(),
+                None => "Unknown".to_string(),
+            };
+
+            let blob = data_to_ws_update_blob(
+                message.chat.id,
+                message.message_id,
+                message.date,
+                username,
+                text
+            );
+            send_ws_push(state.our_channel_id, WsMessageType::Text, blob);
+
+            let _ = Response::new()
+                .body(serde_json::to_vec(&TgResponse::SendMessage(message))?)
+                .send();
+        }
+
+        TgRequest::SendPhoto(send_photo_params) => {
+            let Some(state) = state else {
+                return Err(anyhow::anyhow!("state not initialized"));
+            };
+            let Some(ref api) = state.api else {
+                return Err(anyhow::anyhow!("api not initialized"));
+            };
+            let message = api.send_photo(&send_photo_params)?.result;
+
+            // TODO: there is probably a more elegant way to do this
+            let username: String = match &message.from {
+                Some(from) => 
+                    if let Some(username) = &from.username {
+                        username.to_string()
+                    } else {"Unknown".to_string()}
+                None => "Unknown".to_string(),
+            };
+            let text: String = match &message.text {
+                Some(text) => text.to_string(),
+                None => {
+                    match &message.caption {
+                        Some(caption) => caption.to_string(),
+                        None => "Unknown".to_string(),
+                    }
+                }
+            };
+
+            let blob = data_to_ws_update_blob(
+                message.chat.id,
+                message.message_id,
+                message.date,
+                username,
+                text
+            );
+            send_ws_push(state.our_channel_id, WsMessageType::Text, blob);
+
+            let _ = Response::new()
+                .body(serde_json::to_vec(&TgResponse::SendPhoto(message))?)
+                .send();
+        }
+    }
+    if let Some(state) = state {
+        println!("tg: subscribers later: {:?}", state.subscribers);
     }
     Ok(())
 }
 
-call_init!(init);
+fn handle_inner_message(
+    our: &Address,
+    message: &Message,
+    state: &mut Option<State>,
+) -> anyhow::Result<()> {
+    println!("tg: handle inner message");
+    match message {
+        Message::Request {
+            ref body, source, ..
+        } => handle_request(our, state, body, &source),
+        Message::Response { .. } => Ok(()),
+    }
+}
 
+fn handle_message(
+    our: &Address,
+    state: &mut Option<State>,
+) -> anyhow::Result<()> {
+
+    let message = await_message()?;
+    println!("tg: got message");
+    if message.source().node != our.node {
+        return Err(anyhow::anyhow!(
+            "got request from foreign source {:?}",
+            message.source()
+        ));
+    }
+    println!("tg: match message");
+    match message.source().process.to_string().as_str() {
+        "http_server:distro:sys" | "http_client:distro:sys" => {
+            println!("tg: will run handle http message");
+            handle_http_message(our, &message, state)
+        },
+        _ => {
+            println!("tg: will run handle inner message");
+            handle_inner_message(our, &message, state)
+        },
+    }
+}
+
+call_init!(init);
 fn init(our: Address) {
     println!("tg_bot: booted");
-    // boot uninitialized, wait for initialize command.
-    let mut api: Option<Api> = None;
-    let mut parent: Option<Address> = None;
+
+    // try with true in second param
+    bind_ws_path("/", true, false).unwrap();
+
+    let mut state = State::fetch();
+
+    state =
+        if let None = state {
+            println!("tg: state doesnt exist");
+            let new_state = State::initialize_empty();
+            new_state.save();
+            Some(new_state)
+        } else {
+            state
+        };
 
     loop {
-        match handle_message(&our, &mut api, &mut parent) {
+        println!("tg: handle message");
+        if let Some(s) = &state {
+            println!("tg: subscribers when handling msg: {:?}", s.subscribers);
+        }
+        match handle_message(&our, &mut state) {
             Ok(()) => {}
             Err(e) => {
                 println!("tg: error: {:?}", e);
@@ -129,3 +277,6 @@ fn init(our: Address) {
         };
     }
 }
+
+
+
