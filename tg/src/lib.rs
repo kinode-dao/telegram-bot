@@ -157,6 +157,47 @@ fn handle_request(
                 .body(serde_json::to_vec(&TgResponse::SendMessage(message))?)
                 .send();
         }
+
+        TgRequest::SendPhoto(send_photo_params) => {
+            let Some(state) = state else {
+                return Err(anyhow::anyhow!("state not initialized"));
+            };
+            let Some(ref api) = state.api else {
+                return Err(anyhow::anyhow!("api not initialized"));
+            };
+            let message = api.send_photo(&send_photo_params)?.result;
+
+            // TODO: there is probably a more elegant way to do this
+            let username: String = match &message.from {
+                Some(from) => 
+                    if let Some(username) = &from.username {
+                        username.to_string()
+                    } else {"Unknown".to_string()}
+                None => "Unknown".to_string(),
+            };
+            let text: String = match &message.text {
+                Some(text) => text.to_string(),
+                None => {
+                    match &message.caption {
+                        Some(caption) => caption.to_string(),
+                        None => "Unknown".to_string(),
+                    }
+                }
+            };
+
+            let blob = data_to_ws_update_blob(
+                message.chat.id,
+                message.message_id,
+                message.date,
+                username,
+                text
+            );
+            send_ws_push(state.our_channel_id, WsMessageType::Text, blob);
+
+            let _ = Response::new()
+                .body(serde_json::to_vec(&TgResponse::SendPhoto(message))?)
+                .send();
+        }
     }
     if let Some(state) = state {
         println!("tg: subscribers later: {:?}", state.subscribers);
